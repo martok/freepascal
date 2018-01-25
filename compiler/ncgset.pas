@@ -1080,7 +1080,7 @@ implementation
                    labelcnt:=case_count_labels(labels);
                    { can we omit the range check of the jump table ? }
                    getrange(left.resultdef,lv,hv);
-                   jumptable_no_range:=(lv=min_label) and (hv=max_label);
+                   jumptable_no_range:=(lv=min_label) and (hv=max_label) and ((cs_opt_level4 in current_settings.optimizerswitches) or (cs_check_range in current_settings.localswitches));
 
                    distv:=max_label-min_label;
                    if distv>=0 then
