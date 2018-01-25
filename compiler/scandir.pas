@@ -1041,17 +1041,20 @@ unit scandir;
         current_scanner.skipspace;
         { Support also the ON and OFF as switch }
         hs:=current_scanner.readid;
-        if (hs='ON') then
-          current_settings.optimizerswitches:=level2optimizerswitches
-        else if (hs='OFF') then
-          current_settings.optimizerswitches:=[]
-        else if (hs='DEFAULT') then
-          current_settings.optimizerswitches:=init_settings.optimizerswitches
+        case hs of
+          'OFF': current_settings.optimizerswitches:=[];
+          'ON': current_settings.optimizerswitches:=level2optimizerswitches;
+          'DEFAULT': current_settings.optimizerswitches:=init_settings.optimizerswitches;
+          'LEVEL1': current_settings.optimizerswitches:=level1optimizerswitches;
+          'LEVEL2': current_settings.optimizerswitches:=level2optimizerswitches;
+          'LEVEL3': current_settings.optimizerswitches:=level3optimizerswitches;
+          'LEVEL4': current_settings.optimizerswitches:=level4optimizerswitches;
         else
           begin
             if not UpdateOptimizerStr(hs,current_settings.optimizerswitches) then
               Message1(scan_e_illegal_optimization_specifier,hs);
           end;
+        end;
       end;
 
     procedure dir_overflowchecks;
