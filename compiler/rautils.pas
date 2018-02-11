@@ -185,9 +185,9 @@ Function EscapeToPascal(const s:string): string;
                      Symbol helper routines
 ---------------------------------------------------------------------}
 
-procedure AsmSearchSym(const s:string;var srsym:tsym;var srsymtable:TSymtable);
-Function GetRecordOffsetSize(s:string;Var Offset: tcgint;var Size:tcgint; var mangledname: string; needvmtofs: boolean; out hastypecast: boolean):boolean;
-Function SearchType(const hs:string;var size:tcgint): Boolean;
+procedure AsmSearchSym(const s:string;out srsym:tsym;out srsymtable:TSymtable);
+Function GetRecordOffsetSize(s:string;out Offset: tcgint;out Size:tcgint; out mangledname: string; needvmtofs: boolean; out hastypecast: boolean):boolean;
+Function SearchType(const hs:string;out size:tcgint): Boolean;
 Function SearchRecordType(const s:string): boolean;
 Function SearchIConstant(const s:string; var l:tcgint): boolean;
 Function AsmRegisterPara(sym: tabstractnormalvarsym): boolean;
@@ -198,7 +198,7 @@ Function AsmRegisterPara(sym: tabstractnormalvarsym): boolean;
 
   Procedure ConcatLabel(p: TAsmList;var l : tasmlabel);
   Procedure ConcatConstant(p : TAsmList;value: tcgint; constsize:byte);
-  Procedure ConcatConstSymbol(p : TAsmList;const sym:string;symtyp:tasmsymtype;l:tcgint);
+  Procedure ConcatConstSymbol(p : TAsmList;const sym:string;symtyp:tasmsymtype;l:tcgint;constsize:byte;isofs:boolean);
   Procedure ConcatRealConstant(p : TAsmList;value: bestreal; real_typ : tfloattype);
   Procedure ConcatString(p : TAsmList;s:string);
   procedure ConcatAlign(p:TAsmList;l:tcgint);
@@ -1265,7 +1265,7 @@ end;
                       Symbol table helper routines
 ****************************************************************************}
 
-procedure AsmSearchSym(const s:string;var srsym:tsym;var srsymtable:TSymtable);
+procedure AsmSearchSym(const s:string;out srsym:tsym;out srsymtable:TSymtable);
 var
   i : integer;
 begin
@@ -1292,7 +1292,7 @@ begin
 end;
 
 
-Function SearchType(const hs:string;var size:tcgint): Boolean;
+Function SearchType(const hs:string;out size:tcgint): Boolean;
 var
   srsym : tsym;
   srsymtable : TSymtable;
@@ -1403,7 +1403,7 @@ begin
 end;
 
 
-Function GetRecordOffsetSize(s:string;Var Offset: tcgint;var Size:tcgint; var mangledname: string; needvmtofs: boolean; out hastypecast: boolean):boolean;
+Function GetRecordOffsetSize(s:string;out Offset: tcgint;out Size:tcgint; out mangledname: string; needvmtofs: boolean; out hastypecast: boolean):boolean;
 { search and returns the offset and size of records/objects of the base }
 { with field name setup in field.                              }
 { returns FALSE if not found.                                  }
@@ -1647,9 +1647,30 @@ Begin
 end;
 
 
-  Procedure ConcatConstSymbol(p : TAsmList;const sym:string;symtyp:tasmsymtype;l:tcgint);
+  Procedure ConcatConstSymbol(p : TAsmList;const sym:string;symtyp:tasmsymtype;l:tcgint;constsize:byte;isofs:boolean);
   begin
+{$ifdef i8086}
+    { 'DW xx' as well as 'DW OFFSET xx' are just near pointers }
+    if constsize=2 then
+      p.concat(Tai_const.Createname_near(sym,l))
+    else if constsize=4 then
+      begin
+        if isofs then
+          begin
+            { 'DD OFFSET xx' is a 32-bit offset; since we don't produce 32-bit
+              relocations yet, just do a 16-bit one and set the high word to 0 }
+            p.concat(Tai_const.Createname_near(sym,l));
+            p.concat(Tai_const.Create_16bit(0));
+          end
+        else
+          { 'DD xx' is a far pointer }
+          p.concat(Tai_const.Createname_far(sym,l));
+      end
+    else
+      internalerror(2018020701);
+{$else i8086}
     p.concat(Tai_const.Createname(sym,l));
+{$endif i8086}
   end;
 
 

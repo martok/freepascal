@@ -277,6 +277,7 @@ type
     Procedure TestAssignIntToStringFail;
     Procedure TestAssignStringToIntFail;
     Procedure TestIntegerOperators;
+    Procedure TestIntegerBoolFail;
     Procedure TestBooleanOperators;
     Procedure TestStringOperators;
     Procedure TestWideCharOperators;
@@ -317,6 +318,7 @@ type
     Procedure TestRepeatUntilNonBoolFail;
     Procedure TestWhileDoNonBoolFail;
     Procedure TestIfThenNonBoolFail;
+    Procedure TestIfAssignMissingSemicolonFail;
     Procedure TestForLoopVarNonVarFail;
     Procedure TestForLoopStartIncompFail;
     Procedure TestForLoopEndIncompFail;
@@ -373,6 +375,7 @@ type
     Procedure TestProcOverloadDelphiOverride;
     Procedure TestProcDuplicate;
     Procedure TestNestedProc;
+    Procedure TestNestedProc_ResultString;
     Procedure TestFuncAssignFail;
     Procedure TestForwardProc;
     Procedure TestForwardProcUnresolved;
@@ -3768,6 +3771,17 @@ begin
   ParseProgram;
 end;
 
+procedure TTestResolver.TestIntegerBoolFail;
+begin
+  StartProgram(false);
+  Add([
+  'var i: longint;',
+  'begin',
+  '  i:=3 * false;']);
+  CheckResolverException('Operator is not overloaded: "Longint" * "Boolean"',
+    nOperatorIsNotOverloadedAOpB);
+end;
+
 procedure TTestResolver.TestBooleanOperators;
 begin
   StartProgram(false);
@@ -4226,19 +4240,21 @@ end;
 procedure TTestResolver.TestStatements;
 begin
   StartProgram(false);
-  Add('var');
-  Add('  v1,v2,v3:longint;');
-  Add('begin');
-  Add('  v1:=1;');
-  Add('  v2:=v1+v1*v1+v1 div v1;');
-  Add('  v3:=-v1;');
-  Add('  repeat');
-  Add('    v1:=v1+1;');
-  Add('  until v1>=5;');
-  Add('  while v1>=0 do');
-  Add('    v1:=v1-v2;');
-  Add('  for v1:=v2 to v3 do v2:=v1;');
-  Add('  if v1<v2 then v3:=v1 else v3:=v2;');
+  Add([
+  'var',
+  '  v1,v2,v3:longint;',
+  'begin',
+  '  v1:=1;',
+  '  v2:=v1+v1*v1+v1 div v1;',
+  '  v3:=-v1;',
+  '  repeat',
+  '    v1:=v1+1;',
+  '  until v1>=5;',
+  '  while v1>=0 do',
+  '    v1:=v1-v2;',
+  '  for v1:=v2 to v3 do v2:=v1;',
+  '  if v1<v2 then v3:=v1 else v3:=v2;',
+  '']);
   ParseProgram;
   AssertEquals('3 declarations',3,PasProgram.ProgramSection.Declarations.Count);
 end;
@@ -4447,6 +4463,18 @@ begin
   Add('begin');
   Add('  if 3 then ;');
   CheckResolverException('Boolean expected, but Longint found',nXExpectedButYFound);
+end;
+
+procedure TTestResolver.TestIfAssignMissingSemicolonFail;
+begin
+  StartProgram(false);
+  Add([
+  'var',
+  '  v:longint;',
+  'begin',
+  '  if true then v:=1',
+  '  v:=2']);
+  CheckParserException('Expected "Semicolon"',nParserExpectTokenError);
 end;
 
 procedure TTestResolver.TestForLoopVarNonVarFail;
@@ -5569,6 +5597,59 @@ begin
   Add('end;');
   Add('begin');
   ParseProgram;
+end;
+
+procedure TTestResolver.TestNestedProc_ResultString;
+var
+  aMarker: PSrcMarker;
+  Elements: TFPList;
+  i: Integer;
+  El: TPasElement;
+  Ref: TResolvedReference;
+begin
+  StartProgram(false);
+  Add([
+  'function DoIt: string;',
+  '  function Sub: char;',
+  '  begin',
+  '    {#a1}DoIt:=#65;',
+  '    {#a2}DoIt[1]:=#66;',
+  '    {#a3}DoIt;',
+  '  end;',
+  'begin',
+  '  {#b1}DoIt:=#67;',
+  '  {#b2}DoIt[2]:=#68;',
+  '  {#b3}DoIt;',
+  'end;',
+  'begin']);
+  ParseProgram;
+  aMarker:=FirstSrcMarker;
+  while aMarker<>nil do
+    begin
+    //writeln('TTestResolver.TestNestedProc_ResultString ',aMarker^.Identifier,' ',aMarker^.StartCol,' ',aMarker^.EndCol);
+    Elements:=FindElementsAt(aMarker);
+    try
+      for i:=0 to Elements.Count-1 do
+        begin
+        El:=TPasElement(Elements[i]);
+        //writeln('TTestResolver.TestNestedProc_ResultString ',aMarker^.Identifier,' ',i,'/',Elements.Count,' El=',GetObjName(El),' ',GetObjName(El.CustomData));
+        if not (El.CustomData is TResolvedReference) then continue;
+        Ref:=TResolvedReference(El.CustomData);
+        //writeln('TTestResolver.TestNestedProc_ResultString ',aMarker^.Identifier,' ',i,'/',Elements.Count,' El=',GetObjName(El),' Decl=',GetObjName(Ref.Declaration));
+        case aMarker^.Identifier of
+        'a1','a2','b1','b2':
+          if not (Ref.Declaration is TPasResultElement) then
+            RaiseErrorAtSrcMarker('expected FuncResult at "#'+aMarker^.Identifier+', but was "'+GetObjName(Ref.Declaration)+'"',aMarker);
+        'a3','b3':
+          if not (Ref.Declaration is TPasFunction) then
+            RaiseErrorAtSrcMarker('expected TPasFunction at "#'+aMarker^.Identifier+', but was "'+GetObjName(Ref.Declaration)+'"',aMarker);
+        end;
+        end;
+    finally
+      Elements.Free;
+    end;
+    aMarker:=aMarker^.Next;
+    end;
 end;
 
 procedure TTestResolver.TestFuncAssignFail;
@@ -8249,48 +8330,52 @@ end;
 procedure TTestResolver.TestClass_Const;
 begin
   StartProgram(false);
-  Add('type');
-  Add('  integer = longint;');
-  Add('  TClass = class of TObject;');
-  Add('  TObject = class');
-  Add('  public');
-  Add('    const cI: integer = 3;');
-  Add('    procedure DoIt;');
-  Add('    class procedure DoMore;');
-  Add('  end;');
-  Add('implementation');
-  Add('procedure tobject.doit;');
-  Add('begin');
-  Add('  if cI=4 then;');
-  Add('  if 5=cI then;');
-  Add('  if Self.cI=6 then;');
-  Add('  if 7=Self.cI then;');
-  Add('  with Self do begin');
-  Add('    if cI=11 then;');
-  Add('    if 12=cI then;');
-  Add('  end;');
-  Add('end;');
-  Add('class procedure tobject.domore;');
-  Add('begin');
-  Add('  if cI=8 then;');
-  Add('  if Self.cI=9 then;');
-  Add('  if 10=cI then;');
-  Add('  if 11=Self.cI then;');
-  Add('  with Self do begin');
-  Add('    if cI=13 then;');
-  Add('    if 14=cI then;');
-  Add('  end;');
-  Add('end;');
-  Add('var');
-  Add('  Obj: TObject;');
-  Add('  Cla: TClass;');
-  Add('begin');
-  Add('  if TObject.cI=21 then ;');
-  Add('  if Obj.cI=22 then ;');
-  Add('  if Cla.cI=23 then ;');
-  Add('  with obj do if ci=24 then;');
-  Add('  with TObject do if ci=25 then;');
-  Add('  with Cla do if ci=26 then;');
+  Add([
+  'type',
+  '  integer = longint;',
+  '  TClass = class of TObject;',
+  '  TObject = class',
+  '  strict private const',
+  '    Prefix = ''binary'';',
+  '    PrefixLength = Length(Prefix);',
+  '  public',
+  '    const cI: integer = 3;',
+  '    procedure DoIt;',
+  '    class procedure DoMore;',
+  '  end;',
+  'implementation',
+  'procedure tobject.doit;',
+  'begin',
+  '  if cI=4 then;',
+  '  if 5=cI then;',
+  '  if Self.cI=6 then;',
+  '  if 7=Self.cI then;',
+  '  with Self do begin',
+  '    if cI=11 then;',
+  '    if 12=cI then;',
+  '  end;',
+  'end;',
+  'class procedure tobject.domore;',
+  'begin',
+  '  if cI=8 then;',
+  '  if Self.cI=9 then;',
+  '  if 10=cI then;',
+  '  if 11=Self.cI then;',
+  '  with Self do begin',
+  '    if cI=13 then;',
+  '    if 14=cI then;',
+  '  end;',
+  'end;',
+  'var',
+  '  Obj: TObject;',
+  '  Cla: TClass;',
+  'begin',
+  '  if TObject.cI=21 then ;',
+  '  if Obj.cI=22 then ;',
+  '  if Cla.cI=23 then ;',
+  '  with obj do if ci=24 then;',
+  '  with TObject do if ci=25 then;',
+  '  with Cla do if ci=26 then;']);
   ParseProgram;
   CheckResolverUnexpectedHints;
 end;
@@ -8530,7 +8615,7 @@ begin
   Add('var cars: TCars;');
   Add('begin');
   Add('  if cars is TCars then ;');
-  CheckResolverException('left side of is-operator expects a class, but got "class of" type',
+  CheckResolverException('left side of is-operator expects a class, but got "class of"',
     nLeftSideOfIsOperatorExpectsAClassButGot);
 end;
 
@@ -8546,7 +8631,8 @@ begin
   Add('  cars: TCars;');
   Add('begin');
   Add('  cars:=cars as TCars;');
-  CheckResolverException('illegal qualifier "as"',nIllegalQualifier);
+  CheckResolverException('Operator is not overloaded: "TCars" as "class of TCars"',
+    nOperatorIsNotOverloadedAOpB);
 end;
 
 procedure TTestResolver.TestClassOfIsOperator;
@@ -8862,7 +8948,8 @@ begin
   Add('  c: tclass;');
   Add('begin');
   Add('  c:=c as TClass;');
-  CheckResolverException('illegal qualifier "as"',nIllegalQualifier);
+  CheckResolverException('Operator is not overloaded: "TClass" as "class of TClass"',
+    nOperatorIsNotOverloadedAOpB);
 end;
 
 procedure TTestResolver.TestClassOf_MemberAsFail;
@@ -8876,7 +8963,7 @@ begin
   Add('var o: TObject;');
   Add('begin');
   Add('  o.c:=o.c as TClass;');
-  CheckResolverException('illegal qualifier "as"',nIllegalQualifier);
+  CheckResolverException('Operator is not overloaded: "TClass" as "class of TClass"',nOperatorIsNotOverloadedAOpB);
 end;
 
 procedure TTestResolver.TestClassOf_IsFail;
@@ -8890,7 +8977,7 @@ begin
   Add('  c: tclass;');
   Add('begin');
   Add('  if c is TObject then;');
-  CheckResolverException('left side of is-operator expects a class, but got "class of" type',
+  CheckResolverException('left side of is-operator expects a class, but got "class of"',
     nLeftSideOfIsOperatorExpectsAClassButGot);
 end;
 
@@ -9581,8 +9668,8 @@ begin
   Add('var o: TObject;');
   Add('begin');
   Add('  if o[5]=6 then;');
-  CheckResolverException('illegal qualifier "["',
-    nIllegalQualifier);
+  CheckResolverException('illegal qualifier "[" after "TObject"',
+    nIllegalQualifierAfter);
 end;
 
 procedure TTestResolver.TestIgnoreInterfaces;
@@ -10932,7 +11019,7 @@ begin
   Add('var n: TNotifyEvent;');
   Add('begin');
   Add('  n:=@ProcA;');
-  CheckResolverException('procedure type modifier "of Object" mismatch',
+  CheckResolverException('procedural type modifier "of Object" mismatch',
     nXModifierMismatchY);
 end;
 
@@ -10951,7 +11038,7 @@ begin
   Add('  o: TObject;');
   Add('begin');
   Add('  n:=@o.ProcA;');
-  CheckResolverException('procedure type modifier "of Object" mismatch',
+  CheckResolverException('procedural type modifier "of Object" mismatch',
     nXModifierMismatchY);
 end;
 
@@ -10966,7 +11053,7 @@ begin
   Add('begin');
   Add('  p:=@ProcA;');
   CheckResolverException(
-    'Incompatible types: got "procedure type" expected "function type"',
+    'Incompatible types: got "procedural type" expected "functional type"',
     nIncompatibleTypesGotExpected);
 end;
 
@@ -11012,7 +11099,7 @@ begin
   Add('  p:=@SubProc;');
   Add('end;');
   Add('begin');
-  CheckResolverException('procedure type modifier "is nested" mismatch',
+  CheckResolverException('procedural type modifier "is nested" mismatch',
     nXModifierMismatchY);
 end;
 
@@ -11211,7 +11298,7 @@ begin
   Add('var p: TNestedProc;');
   Add('begin');
   Add('  p:=@DoIt;');
-  CheckResolverException('procedure type modifier "is nested" mismatch',nXModifierMismatchY);
+  CheckResolverException('procedural type modifier "is nested" mismatch',nXModifierMismatchY);
 end;
 
 procedure TTestResolver.TestProcType_ReferenceTo;
@@ -11583,7 +11670,7 @@ begin
   Add('  e: TEvent;');
   Add('begin');
   Add('  p:=Pointer(e);');
-  CheckResolverException('Illegal type conversion: "procedure type of Object" to "Pointer"',
+  CheckResolverException('Illegal type conversion: "procedural type of Object" to "Pointer"',
     nIllegalTypeConversionTo);
 end;
 

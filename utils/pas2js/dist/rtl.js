@@ -111,6 +111,7 @@ var rtl = {
   exitcode: 0,
 
   run: function(module_name){
+  
     function doRun(){
       if (!rtl.hasString(module_name)) module_name='program';
       if (rtl.debug_load_units) rtl.debug('rtl.run module="'+module_name+'"');
@@ -125,7 +126,7 @@ var rtl = {
         if (rtl.isNumber(r)) rtl.exitcode = r;
       }
     }
-
+    
     if (rtl.showUncaughtExceptions) {
       try{
         doRun();
@@ -526,13 +527,13 @@ var rtl = {
   },
 
   includeSet: function(s,enumvalue){
-    if (s.$shared) s = cloneSet(s);
+    if (s.$shared) s = rtl.cloneSet(s);
     s[enumvalue] = true;
     return s;
   },
 
   excludeSet: function(s,enumvalue){
-    if (s.$shared) s = cloneSet(s);
+    if (s.$shared) s = rtl.cloneSet(s);
     delete s[enumvalue];
     return s;
   },

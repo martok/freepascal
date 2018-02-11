@@ -120,7 +120,7 @@ unit raatt;
       { globals }
       verbose,systems,
       { input }
-      scanner,
+      scanner, pbase,
       { symtable }
       symbase,symtype,symsym,symdef,symtable,
 {$ifdef x86}
@@ -896,7 +896,7 @@ unit raatt;
                  begin
                    if constsize<>sizeof(pint) then
                     Message(asmr_w_32bit_const_for_address);
-                   ConcatConstSymbol(curlist,asmsym,asmsymtyp,value)
+                   ConcatConstSymbol(curlist,asmsym,asmsymtyp,value,constsize,true)
                  end
                 else
                  ConcatConstant(curlist,value,constsize);
@@ -1049,6 +1049,11 @@ unit raatt;
           _asmsorted:=TRUE;
         end;
        curlist:=TAsmList.Create;
+
+       { we might need to know which parameters are passed in registers }
+       if not parse_generic then
+         current_procinfo.generate_parameter_info;
+
        lasTSec:=sec_code;
        { start tokenizer }
        gettoken;

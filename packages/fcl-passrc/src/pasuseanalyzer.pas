@@ -1814,7 +1814,7 @@ var
   Usage: TPAElement;
   ProcScope: TPasProcedureScope;
   PosEl: TPasElement;
-  DeclProc: TPasProcedure;
+  DeclProc, ImplProc: TPasProcedure;
 begin
   {$IFDEF VerbosePasAnalyzer}
   writeln('TPasAnalyzer.EmitProcedureHints ',GetElModName(El));
@@ -1824,6 +1824,10 @@ begin
     DeclProc:=El
   else
     DeclProc:=ProcScope.DeclarationProc;
+  if ProcScope.ImplProc=nil then
+    ImplProc:=El
+  else
+    ImplProc:=ProcScope.ImplProc;
   if FindNode(DeclProc)=nil then
     begin
     // procedure never used
@@ -1841,7 +1845,8 @@ begin
 
   // procedure was used
 
-  if [pmAbstract,pmAssembler,pmExternal]*El.Modifiers<>[] then exit;
+  if [pmAbstract,pmAssembler,pmExternal]*DeclProc.Modifiers<>[] then exit;
+  if [pmAssembler]*ImplProc.Modifiers<>[] then exit;
 
   if ProcScope.DeclarationProc=nil then
     begin
@@ -2074,9 +2079,9 @@ begin
         if ProcScope.ImplProc<>nil then
           ProcScope:=ProcScope.ImplProc.CustomData as TPasProcedureScope;
         case MsgType of
-        mtHint: if not (bsHints in ProcScope.ScannerBoolSwitches) then exit;
-        mtNote: if not (bsNotes in ProcScope.ScannerBoolSwitches) then exit;
-        mtWarning: if not (bsWarnings in ProcScope.ScannerBoolSwitches) then exit;
+        mtHint: if not (bsHints in ProcScope.BoolSwitches) then exit;
+        mtNote: if not (bsNotes in ProcScope.BoolSwitches) then exit;
+        mtWarning: if not (bsWarnings in ProcScope.BoolSwitches) then exit;
         end;
         break;
         end
@@ -2084,9 +2089,9 @@ begin
         begin
         ModScope:=TPasModule(El).CustomData as TPasModuleScope;
         case MsgType of
-        mtHint: if not (bsHints in ModScope.ScannerBoolSwitches) then exit;
-        mtNote: if not (bsNotes in ModScope.ScannerBoolSwitches) then exit;
-        mtWarning: if not (bsWarnings in ModScope.ScannerBoolSwitches) then exit;
+        mtHint: if not (bsHints in ModScope.BoolSwitches) then exit;
+        mtNote: if not (bsNotes in ModScope.BoolSwitches) then exit;
+        mtWarning: if not (bsWarnings in ModScope.BoolSwitches) then exit;
         end;
         break;
         end;

@@ -766,9 +766,18 @@ Var
   { Standard In- and Output }
   ErrOutput,
   Output,
-  Input,
+  Input       : Text;
+{$ifndef FPC_STDOUT_TRUE_ALIAS}
   StdOut,
   StdErr      : Text;
+{$else FPC_STDOUT_TRUE_ALIAS}
+  { Optionally, make StdOut and StdErr a true alias of Output
+    and ErrOutput. This is benefical on small systems where the
+    data segment size is limited, as it lessens the RTL's data
+    size by a bit more than 1K. }
+  StdOut      : Text Absolute Output;
+  StdErr      : Text Absolute ErrOutput;
+{$endif FPC_STDOUT_TRUE_ALIAS}
   InOutRes    : Word;
   { Stack checking }
   StackBottom : Pointer;
@@ -1429,6 +1438,12 @@ Function GetProcessID:SizeUInt;
 Function GetThreadID:TThreadID;{$ifdef SYSTEMINLINE}inline;{$endif}
 {$endif FPC_HAS_FEATURE_PROCESSES}
 
+{$ifdef cpum68k}
+{ due to the register calling convention which uses address registers explicit
+  variants of the Interlocked* functions for Pointers are needed }
+{$define FPC_HAS_EXPLICIT_INTERLOCKED_POINTER}
+{$endif}
+
 {$ifdef cpu16}
 function InterLockedIncrement (var Target: smallint) : smallint; public name 'FPC_INTERLOCKEDINCREMENT16';
 function InterLockedDecrement (var Target: smallint) : smallint; public name 'FPC_INTERLOCKEDDECREMENT16';
@@ -1449,21 +1464,32 @@ function InterLockedExchangeAdd64 (var Target: int64;Source : int64) : int64; pu
 function InterlockedCompareExchange64(var Target: int64; NewValue: int64; Comperand: int64): int64; public name 'FPC_INTERLOCKEDCOMPAREEXCHANGE64';
 {$endif cpu64}
 { Pointer overloads }
-{$ifdef cpu64}
+{$if defined(FPC_HAS_EXPLICIT_INTERLOCKED_POINTER)}
+{ Note: define FPC_SYSTEM_HAS_EXPLICIT_INTERLOCKED_POINTER if the target platform defines
+        these pointer overloads itself instead of using platform independant inline functions }
+function InterLockedIncrement (var Target: Pointer) : Pointer; {$ifndef FPC_SYSTEM_HAS_EXPLICIT_INTERLOCKED_POINTER}inline;{$endif}
+function InterLockedDecrement (var Target: Pointer) : Pointer; {$ifndef FPC_SYSTEM_HAS_EXPLICIT_INTERLOCKED_POINTER}inline;{$endif}
+function InterLockedExchange (var Target: Pointer;Source : Pointer) : Pointer; {$ifndef FPC_SYSTEM_HAS_EXPLICIT_INTERLOCKED_POINTER}inline;{$endif}
+function InterLockedExchangeAdd (var Target: Pointer;Source : Pointer) : Pointer; {$ifndef FPC_SYSTEM_HAS_EXPLICIT_INTERLOCKED_POINTER}inline;{$endif}
+function InterLockedCompareExchange(var Target: Pointer; NewValue: Pointer; Comperand: Pointer): Pointer;  {$ifndef FPC_SYSTEM_HAS_EXPLICIT_INTERLOCKED_POINTER}inline;{$else}public name 'FPC_INTERLOCKEDEXCHANGEPOINTER';{$endif}
+{ Note: in case of FPC_SYSTEM_HAS_EXPLICIT_INTERLOCKED_POINTER this is an alias for
+        InterLockedCompareExchange (this doesn't work with inline however) }
+function InterLockedCompareExchangePointer(var Target: Pointer; NewValue: Pointer; Comperand: Pointer): Pointer; {$ifndef FPC_INTERLOCKED_POINTER_INLINE}inline;{$else}external name 'FPC_INTERLOCKEDEXCHANGEPOINTER';{$endif}
+{$elseif defined(cpu64)}
 function InterLockedIncrement (var Target: Pointer) : Pointer; external name 'FPC_INTERLOCKEDINCREMENT64';
 function InterLockedDecrement (var Target: Pointer) : Pointer; external name 'FPC_INTERLOCKEDDECREMENT64';
 function InterLockedExchange (var Target: Pointer;Source : Pointer) : Pointer; external name 'FPC_INTERLOCKEDEXCHANGE64';
 function InterLockedExchangeAdd (var Target: Pointer;Source : Pointer) : Pointer; external name 'FPC_INTERLOCKEDEXCHANGEADD64';
 function InterlockedCompareExchange(var Target: Pointer; NewValue: Pointer; Comperand: Pointer): Pointer; external name 'FPC_INTERLOCKEDCOMPAREEXCHANGE64';
 function InterlockedCompareExchangePointer(var Target: Pointer; NewValue: Pointer; Comperand: Pointer): Pointer; external name 'FPC_INTERLOCKEDCOMPAREEXCHANGE64';
-{$else cpu64}
+{$else not FPC_HAS_EXPLICIT_INTERLOCKED_POINTER and not CPU64}
 function InterLockedIncrement (var Target: Pointer) : Pointer; external name 'FPC_INTERLOCKEDINCREMENT';
 function InterLockedDecrement (var Target: Pointer) : Pointer; external name 'FPC_INTERLOCKEDDECREMENT';
 function InterLockedExchange (var Target: Pointer;Source : Pointer) : Pointer; external name 'FPC_INTERLOCKEDEXCHANGE';
 function InterLockedExchangeAdd (var Target: Pointer;Source : Pointer) : Pointer; external name 'FPC_INTERLOCKEDEXCHANGEADD';
 function InterlockedCompareExchange(var Target: Pointer; NewValue: Pointer; Comperand: Pointer): Pointer; external name 'FPC_INTERLOCKEDCOMPAREEXCHANGE';
 function InterlockedCompareExchangePointer(var Target: Pointer; NewValue: Pointer; Comperand: Pointer): Pointer; external name 'FPC_INTERLOCKEDCOMPAREEXCHANGE';
-{$endif cpu64}
+{$endif FPC_HAS_EXPLICIT_INTERLOCKED_POINTER / CPU64}
 { unsigned overloads }
 {$ifdef cpu16}
 function InterLockedIncrement (var Target: word) : word; external name 'FPC_INTERLOCKEDINCREMENT16';
@@ -1523,13 +1549,13 @@ procedure Dump_Stack(var f : text;skipframes : longint);
 procedure DumpExceptionBackTrace(var f:text);
 {$endif FPC_HAS_FEATURE_EXCEPTIONS}
 
-Procedure RunError(w:Word);
-Procedure RunError;{$ifdef SYSTEMINLINE}inline;{$endif}
-Procedure halt(errnum:Longint);
+Procedure RunError(w:Word);noreturn;
+Procedure RunError;{$ifdef SYSTEMINLINE}inline;{$endif}noreturn;
+Procedure halt(errnum:Longint);noreturn;
 {$ifdef FPC_HAS_FEATURE_HEAP}
 Procedure AddExitProc(Proc:TProcedure);
 {$endif FPC_HAS_FEATURE_HEAP}
-Procedure halt;{$ifdef SYSTEMINLINE}inline;{$endif}
+Procedure halt;{$ifdef SYSTEMINLINE}inline;{$endif}noreturn;
 
 { Need to be exported for threads unit }
 {$ifdef FPC_HAS_FEATURE_EXCEPTIONS}

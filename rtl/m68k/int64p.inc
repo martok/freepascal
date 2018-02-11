@@ -23,7 +23,12 @@ asm
     tst.l    d1
     beq.s    @xit0
 
+{$ifndef CPUCOLDFIRE}
     movem.l  d2-d5,-(sp)
+{$else}
+    lea      -20(sp),sp
+    movem.l  d2-d6,(sp)
+{$endif}
     move.l   d0,d5
 
     eor.l    d1,d5
@@ -50,12 +55,34 @@ asm
     mulu.w   d4,d2
     mulu.w   d4,d3
 
+{$ifdef CPUCOLDFIRE}
+    { backup lo value of d0 }
+    clr.l    d6
+    move.w   d0,d6
+    clr.w    d0
+{$endif}
     swap     d0
     clr.l    d4
+{$ifndef CPUCOLDFIRE}
     add.w    d1,d0
     addx.l   d4,d3
     add.w    d2,d0
     addx.l   d4,d3
+{$else}
+    { accumulate the carry bits of both add operations in d4 and add them at
+      once to d3 }
+    move.w   d1,d4
+    add.l    d4,d0
+
+    move.w   d2,d4
+    add.l    d4,d0
+
+    move.l   d0,d4
+    lsr.l    #8,d4
+    lsr.l    #8,d4
+
+    add.l    d4,d3
+ {$endif}
 
     clr.w    d1
     clr.w    d2
@@ -64,6 +91,13 @@ asm
 
     add.l    d3,d1
     swap     d0
+{$ifdef CPUCOLDFIRE}
+    { add original lo value of d0 }
+    swap     d6
+    clr.w    d6
+    swap     d6
+    add.l    d6,d0
+{$endif}
     add.l    d2,d1
 
     tst.l    d5
@@ -73,8 +107,16 @@ asm
     negx.l   d1
 
 @xit:
+{$ifndef CPUCOLDFIRE}
     movem.l  (sp)+,d2-d5
     exg.l    d0,d1
+{$else}
+    move.l   d0,d2
+    move.l   d1,d0
+    move.l   d2,d1
+    movem.l  (sp),d2-d6
+    lea      20(sp),sp
+{$endif}
     rts
 
 @xit0:

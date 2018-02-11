@@ -145,7 +145,6 @@ type
     stUsesClause,
     stTypeSection,
     stTypeDef, // e.g. a TPasType
-    stConstDef, // e.g. a TPasConst
     stResourceString, // e.g. TPasResString
     stProcedure, // also method, procedure, constructor, destructor, ...
     stProcedureHeader,
@@ -1850,11 +1849,13 @@ begin
     if Ref=nil then
       begin
       {$IFDEF VerbosePasResolver}
+      {AllowWriteln}
       if po_resolvestandardtypes in FOptions then
         begin
         writeln('ERROR: TPasParser.ParseSimpleType resolver failed to raise an error');
         ParseExcExpectedIdentifier;
         end;
+      {AllowWriteln-}
       {$ENDIF}
       end
     else if not (Ref is TPasType) then
@@ -3103,6 +3104,7 @@ begin
                 ConstEl := ParseConstDecl(Declarations);
                 Declarations.Declarations.Add(ConstEl);
                 Declarations.Consts.Add(ConstEl);
+                Engine.FinishScope(stDeclaration,ConstEl);
               end;
             declResourcestring:
               begin
@@ -3176,9 +3178,9 @@ begin
                   for i := 0 to List.Count - 1 do
                   begin
                     VarEl := TPasVariable(List[i]);
-                    Engine.FinishScope(stDeclaration,VarEl);
                     Declarations.Declarations.Add(VarEl);
                     Declarations.Variables.Add(VarEl);
+                    Engine.FinishScope(stDeclaration,VarEl);
                   end;
                   CheckToken(tkSemicolon);
                 finally
@@ -3190,6 +3192,7 @@ begin
               PropEl:=ParseProperty(Declarations,CurtokenString,visDefault,false);
               Declarations.Declarations.Add(PropEl);
               Declarations.Properties.Add(PropEl);
+              Engine.FinishScope(stDeclaration,PropEl);
               end;
           else
             ParseExcSyntaxError;
@@ -3209,41 +3212,41 @@ begin
             Case CurToken of
               tkObject,
               tkClass :
-                 begin
-                 ClassEl := TPasClassType(CreateElement(TPasClassType,
-                   TypeName, Declarations, NamePos));
-                 ClassEl.SetGenericTemplates(List);
-                 NextToken;
-                 DoParseClassType(ClassEl);
-                 Declarations.Declarations.Add(ClassEl);
-                 Declarations.Classes.Add(ClassEl);
-                 CheckHint(classel,True);
-                 Engine.FinishScope(stTypeDef,ClassEl);
-                 end;
-              tkRecord:
                 begin
-                RecordEl := TPasRecordType(CreateElement(TPasRecordType,
+                ClassEl := TPasClassType(CreateElement(TPasClassType,
                   TypeName, Declarations, NamePos));
-                RecordEl.SetGenericTemplates(List);
+                ClassEl.SetGenericTemplates(List);
                 NextToken;
-                ParseRecordFieldList(RecordEl,tkend,true);
-                Declarations.Declarations.Add(RecordEl);
-                Declarations.Classes.Add(RecordEl);
-                CheckHint(RecordEl,True);
-                Engine.FinishScope(stTypeDef,RecordEl);
+                DoParseClassType(ClassEl);
+                Declarations.Declarations.Add(ClassEl);
+                Declarations.Classes.Add(ClassEl);
+                CheckHint(classel,True);
+                Engine.FinishScope(stTypeDef,ClassEl);
                 end;
-              tkArray:
-                 begin
-                 if List.Count<>1 then
-                   ParseExc(nParserGenericArray1Element,sParserGenericArray1Element);
-                 ArrEl:=TPasArrayType(ParseArrayType(Declarations,NamePos,TypeName,pmNone));
-                 CheckHint(ArrEl,True);
-                 ArrEl.ElType.Release;
-                 ArrEl.ElType:=TPasGenericTemplateType(List[0]);
-                 Declarations.Declarations.Add(ArrEl);
-                 Declarations.Types.Add(ArrEl);
-                 Engine.FinishScope(stTypeDef,ArrEl);
-                 end;
+             tkRecord:
+               begin
+               RecordEl := TPasRecordType(CreateElement(TPasRecordType,
+                 TypeName, Declarations, NamePos));
+               RecordEl.SetGenericTemplates(List);
+               NextToken;
+               ParseRecordFieldList(RecordEl,tkend,true);
+               Declarations.Declarations.Add(RecordEl);
+               Declarations.Classes.Add(RecordEl);
+               CheckHint(RecordEl,True);
+               Engine.FinishScope(stTypeDef,RecordEl);
+               end;
+             tkArray:
+               begin
+               if List.Count<>1 then
+                 ParseExc(nParserGenericArray1Element,sParserGenericArray1Element);
+               ArrEl:=TPasArrayType(ParseArrayType(Declarations,NamePos,TypeName,pmNone));
+               CheckHint(ArrEl,True);
+               ArrEl.ElType.Release;
+               ArrEl.ElType:=TPasGenericTemplateType(List[0]);
+               Declarations.Declarations.Add(ArrEl);
+               Declarations.Types.Add(ArrEl);
+               Engine.FinishScope(stTypeDef,ArrEl);
+               end;
             else
               ParseExc(nParserGenericClassOrArray,SParserGenericClassOrArray);
             end;
@@ -3471,11 +3474,22 @@ begin
       UngetToken;
       Result.IsConst:=true;
       end;
-    ExpectToken(tkEqual);
     NextToken;
-    Result.Expr:=DoParseConstValueExpression(Result);
-    if (Result.VarType=Nil) and (Result.Expr.Kind=pekRange) then
-      ParseExc(nParserNoConstRangeAllowed, SParserNoConstRangeAllowed );
+    if CurToken=tkEqual then
+      begin
+      NextToken;
+      Result.Expr:=DoParseConstValueExpression(Result);
+      if (Result.VarType=Nil) and (Result.Expr.Kind=pekRange) then
+        ParseExc(nParserNoConstRangeAllowed,SParserNoConstRangeAllowed);
+      end
+    else if (Result.VarType<>nil)
+        and (po_ExtClassConstWithoutExpr in Options)
+        and (Parent is TPasClassType)
+        and TPasClassType(Parent).IsExternal
+        and (TPasClassType(Parent).ObjKind=okClass) then
+      // const without expression is allowed in external class
+    else
+      CheckToken(tkEqual);
     UngetToken;
     CheckHint(Result,True);
     ok:=true;
@@ -3483,7 +3497,6 @@ begin
     if not ok then
       ReleaseAndNil(TPasElement(Result));
   end;
-  Engine.FinishScope(stConstDef,Result);
 end;
 
 // Starts after the variable name
@@ -4814,7 +4827,6 @@ begin
     if not ok then
       Result.Release;
   end;
-  Engine.FinishScope(stDeclaration,Result);
 end;
 
 // Starts after the "begin" token
@@ -4956,15 +4968,19 @@ var
   end;
 
   procedure CheckSemicolon;
+  var
+    t: TToken;
   begin
-    if (CurBlock.Elements.Count>0) and not (GetPrevToken in [tkSemicolon,tkColon])
-        and (CurBlock.ClassType<>TPasImplIfElse) then
-      begin
-      {$IFDEF VerbosePasParser}
-      writeln('TPasParser.ParseStatement.CheckSemicolon Prev=',GetPrevToken,' Cur=',CurToken,' ',CurBlock.ClassName,' ',CurBlock.Elements.Count,' ',TObject(CurBlock.Elements[0]).ClassName);
-      {$ENDIF}
-      ParseExcTokenError('Semicolon');
-      end;
+    if (CurBlock.Elements.Count=0) then exit;
+    t:=GetPrevToken;
+    if t in [tkSemicolon,tkColon] then
+      exit;
+    if (CurBlock.ClassType=TPasImplIfElse) and (t=tkelse) then
+      exit;
+    {$IFDEF VerbosePasParser}
+    writeln('TPasParser.ParseStatement.CheckSemicolon Prev=',GetPrevToken,' Cur=',CurToken,' ',CurBlock.ClassName,' ',CurBlock.Elements.Count,' ',TObject(CurBlock.Elements[0]).ClassName);
+    {$ENDIF}
+    ParseExcTokenError('Semicolon');
   end;
 
 var
@@ -4994,7 +5010,7 @@ begin
   while True do
   begin
     NextToken;
-    // WriteLn({$IFDEF VerbosePasParser}i,{$ENDIF}' Token=',CurTokenText);
+    //WriteLn({$IFDEF VerbosePasParser}i,{$ENDIF}' Token=',CurTokenText);
     case CurToken of
     tkasm:
       begin
@@ -5440,7 +5456,7 @@ begin
             // assign statement
             Ak:=TokenToAssignKind(CurToken);
             NextToken;
-            right:=DoParseExpression(CurBlock); // this may solve TPasImplWhileDo.AddElement BUG
+            right:=DoParseExpression(CurBlock);
             El:=TPasImplAssign(CreateElement(TPasImplAssign,'',CurBlock,SrcPos));
             left.Parent:=El;
             right.Parent:=El;
@@ -5652,12 +5668,14 @@ end;
 procedure TPasParser.DumpCurToken(const Msg: String; IndentAction: TIndentAction
   );
 begin
+  {AllowWriteln}
   if IndentAction=iaUndent then
     FDumpIndent:=copy(FDumpIndent,1,Length(FDumpIndent)-2);
   Writeln(FDumpIndent,Msg,' : ',TokenInfos[CurToken],' "',CurTokenString,'", Position: ',Scanner.CurFilename,'(',Scanner.CurRow,',',SCanner.CurColumn,') : ',Scanner.CurLine);
   if IndentAction=iaIndent then
     FDumpIndent:=FDumpIndent+'  ';
   Flush(output);
+  {AllowWriteln-}
 end;
 
 function TPasParser.GetCurrentModeSwitches: TModeSwitches;
@@ -5703,6 +5721,7 @@ begin
         Cons:=ParseConstDecl(ARec);
         Cons.Visibility:=v;
         ARec.members.Add(Cons);
+        Engine.FinishScope(stDeclaration,Cons);
         end;
       tkVar:
         begin
@@ -5735,6 +5754,7 @@ begin
         ExpectToken(tkIdentifier);
         Prop:=ParseProperty(ARec,CurtokenString,v,isClass);
         Arec.Members.Add(Prop);
+        Engine.FinishScope(stDeclaration,Prop);
         end;
       tkOperator,
       tkProcedure,
@@ -5915,6 +5935,7 @@ begin
       begin
       Element := TPasElement(VarList[i]);
       Element.Visibility := AVisibility;
+      AType.Members.Add(Element);
       if (Element is TPasVariable) then
         begin
         VarEl:=TPasVariable(Element);
@@ -5924,7 +5945,6 @@ begin
           Include(VarEl.VarModifiers,vmStatic);
         Engine.FinishScope(stDeclaration,VarEl);
         end;
-      AType.Members.Add(Element);
       end;
   finally
     VarList.Free;
@@ -5942,6 +5962,7 @@ begin
     T:=ParseTypeDecl(AType);
     T.Visibility:=AVisibility;
     AType.Members.Add(t);
+    Engine.FinishScope(stTypeDef,T);
 //    Writeln(CurtokenString,' ',TokenInfos[Curtoken]);
     NextToken;
     Done:=(Curtoken<>tkIdentifier) or CheckVisibility(CurtokenString,AVisibility);
@@ -5961,6 +5982,7 @@ begin
     C:=ParseConstDecl(AType);
     C.Visibility:=AVisibility;
     AType.Members.Add(C);
+    Engine.FinishScope(stDeclaration,C);
 //    Writeln(CurtokenString,' ',TokenInfos[Curtoken]);
     NextToken;
     Done:=(Curtoken<>tkIdentifier) or CheckVisibility(CurtokenString,AVisibility);
@@ -5979,6 +6001,7 @@ Var
   CurSection : TSectionType;
   haveClass : Boolean;
   LastToken: TToken;
+  PropEl: TPasProperty;
 
 begin
   CurSection:=stNone;
@@ -6047,7 +6070,9 @@ begin
         if not haveClass then
           SaveComments;
         ExpectIdentifier;
-        AType.Members.Add(ParseProperty(AType,CurtokenString,CurVisibility,HaveClass));
+        PropEl:=ParseProperty(AType,CurtokenString,CurVisibility,HaveClass);
+        AType.Members.Add(PropEl);
+        Engine.FinishScope(stDeclaration,PropEl);
         HaveClass:=False;
         end;
       tkSquaredBraceOpen:
@@ -6319,6 +6344,7 @@ begin
 end;
 
 {$IFDEF VerbosePasParser}
+{AllowWriteln}
 procedure TPasParser.WriteBinaryExprChain(Prefix: string; First, Last: TPasExpr
   );
 var
@@ -6378,6 +6404,7 @@ begin
       writeln(' Last=nil');
     end;
 end;
+{AllowWriteln-}
 {$ENDIF}
 
 function TPasParser.CreateUnaryExpr(AParent: TPasElement; AOperand: TPasExpr;

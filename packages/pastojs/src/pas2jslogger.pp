@@ -1,4 +1,17 @@
-{ Author: Mattias Gaertner  2017  mattias@freepascal.org
+{
+    This file is part of the Free Component Library (FCL)
+    Copyright (c) 2018  Mattias Gaertner  mattias@freepascal.org
+
+    Pascal to Javascript converter class.
+
+    See the file COPYING.FPC, included in this distribution,
+    for details about the copyright.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+ **********************************************************************
 
   Abstract:
     Logging to stdout or file.
@@ -13,7 +26,7 @@ unit Pas2jsLogger;
 interface
 
 uses
-  Classes, SysUtils, PasTree, PScanner, jstree, jsbase, jswriter,
+  Classes, SysUtils, PasTree, PScanner, jstree, jsbase, jswriter, fpjson,
   Pas2jsFileUtils;
 
 const
@@ -64,6 +77,8 @@ type
     procedure SetMsgNumberDisabled(MsgNumber: integer; AValue: boolean);
     procedure SetOutputFilename(AValue: string);
     procedure SetSorted(AValue: boolean);
+    procedure DoLogRaw(const Msg: string; SkipEncoding : Boolean);
+    function Concatenate(Args: array of const): string;
   public
     constructor Create;
     destructor Destroy; override;
@@ -73,16 +88,20 @@ type
     procedure LogRaw(const Msg: string); overload;
     procedure LogRaw(Args: array of const); overload;
     procedure LogLn;
+    procedure LogPlain(const Msg: string); overload;
+    procedure LogPlain(Args: array of const); overload;
     procedure LogMsg(MsgNumber: integer; Args: array of const;
+      const Filename: string = ''; Line: integer = 0; Col: integer = 0;
+      UseFilter: boolean = true);
+    procedure Log(MsgType: TMessageType; Msg: string; MsgNumber: integer = 0;
       const Filename: string = ''; Line: integer = 0; Col: integer = 0;
       UseFilter: boolean = true);
     procedure LogMsgIgnoreFilter(MsgNumber: integer; Args: array of const);
     function MsgTypeToStr(MsgType: TMessageType): string;
-    procedure Log(MsgType: TMessageType; Msg: string; MsgNumber: integer = 0;
-      const Filename: string = ''; Line: integer = 0; Col: integer = 0;
-      UseFilter: boolean = true);
     function GetMsgText(MsgNumber: integer; Args: array of const): string;
     function FormatMsg(MsgType: TMessageType; Msg: string; MsgNumber: integer = 0;
+      const Filename: string = ''; Line: integer = 0; Col: integer = 0): string;
+    function FormatJSONMsg(MsgType: TMessageType; Msg: string; MsgNumber: integer = 0;
       const Filename: string = ''; Line: integer = 0; Col: integer = 0): string;
     procedure OpenOutputFile;
     procedure Flush;
@@ -420,7 +439,7 @@ var
 begin
   NewValue:=NormalizeEncoding(AValue);
   if FEncoding=NewValue then Exit;
-  //LogRaw(ClassName+': Encoding changed from "'+FEncoding+'" to "'+NewValue+'"');
+  //LogPlain(ClassName+': Encoding changed from "'+FEncoding+'" to "'+NewValue+'"');
   FEncoding:=NewValue;
 end;
 
@@ -473,6 +492,79 @@ begin
   if FSorted=AValue then Exit;
   FSorted:=AValue;
   if FSorted then Sort;
+end;
+
+procedure TPas2jsLogger.DoLogRaw(const Msg: string; SkipEncoding : Boolean);
+
+Var
+  S : String;
+
+begin
+  if SkipEncoding then
+    S:=Msg
+  else
+    begin
+    if (Encoding='utf8') or (Encoding='json') then
+      S:=Msg
+    else if Encoding='console' then
+      S:=UTF8ToConsole(Msg)
+    else if Encoding='system' then
+      S:=UTF8ToSystemCP(Msg)
+    else
+      begin
+      // default: write UTF-8 to outputfile and console codepage to console
+      if FOutputFile=nil then
+        S:=UTF8ToConsole(Msg);
+      end;
+    end;
+  //writeln('TPas2jsLogger.LogPlain "',Encoding,'" "',DbgStr(S),'"');
+  if FOnLog<>Nil then
+    FOnLog(Self,S)
+  else if FOutputFile<>nil then
+    FOutputFile.Write(S+LineEnding)
+  else
+    begin
+    // prevent codepage conversion magic
+    SetCodePage(RawByteString(S), CP_OEMCP, False);
+    {AllowWriteln}
+    writeln(S);
+    {AllowWriteln-}
+    end;
+end;
+
+function TPas2jsLogger.Concatenate(Args: array of const): string;
+var
+  s: String;
+  i: Integer;
+begin
+  s:='';
+  for i:=Low(Args) to High(Args) do
+  begin
+    case Args[i].VType of
+      vtInteger:      s += IntToStr(Args[i].VInteger);
+      vtBoolean:      s += BoolToStr(Args[i].VBoolean);
+      vtChar:         s += Args[i].VChar;
+      {$ifndef FPUNONE}
+      vtExtended:     ; //  Args[i].VExtended^;
+      {$ENDIF}
+      vtString:       s += Args[i].VString^;
+      vtPointer:      ; //  Args[i].VPointer;
+      vtPChar:        s += Args[i].VPChar;
+      vtObject:       ; //  Args[i].VObject;
+      vtClass:        ; //  Args[i].VClass;
+      vtWideChar:     s += AnsiString(Args[i].VWideChar);
+      vtPWideChar:    s += AnsiString(Args[i].VPWideChar);
+      vtAnsiString:   s += AnsiString(Args[i].VAnsiString);
+      vtCurrency:     ; //  Args[i].VCurrency^);
+      vtVariant:      ; //  Args[i].VVariant^);
+      vtInterface:    ; //  Args[i].VInterface^);
+      vtWidestring:   s += AnsiString(WideString(Args[i].VWideString));
+      vtInt64:        s += IntToStr(Args[i].VInt64^);
+      vtQWord:        s += IntToStr(Args[i].VQWord^);
+      vtUnicodeString:s += AnsiString(UnicodeString(Args[i].VUnicodeString));
+    end;
+  end;
+  Result:=s;
 end;
 
 constructor TPas2jsLogger.Create;
@@ -569,65 +661,13 @@ begin
 end;
 
 procedure TPas2jsLogger.LogRaw(const Msg: string);
-var
-  S: String;
 begin
-  S:=Msg;
-  if Encoding='utf8' then
-  else if Encoding='console' then
-    S:=UTF8ToConsole(S)
-  else if Encoding='system' then
-    S:=UTF8ToSystemCP(S)
-  else begin
-    // default: write UTF-8 to outputfile and console codepage to console
-    if FOutputFile=nil then
-      S:=UTF8ToConsole(S);
-  end;
-  //writeln('TPas2jsLogger.LogRaw "',Encoding,'" "',DbgStr(S),'"');
-  if FOnLog<>Nil then
-    FOnLog(Self,S)
-  else if FOutputFile<>nil then
-    FOutputFile.Write(S+LineEnding)
-  else begin
-    // prevent codepage conversion magic
-    SetCodePage(RawByteString(S), CP_OEMCP, False);
-    writeln(S);
-  end;
+  DoLogRaw(Msg,False);
 end;
 
 procedure TPas2jsLogger.LogRaw(Args: array of const);
-var
-  s: String;
-  i: Integer;
 begin
-  s:='';
-  for i:=Low(Args) to High(Args) do
-  begin
-    case Args[i].VType of
-      vtInteger:      s += IntToStr(Args[i].VInteger);
-      vtBoolean:      s += BoolToStr(Args[i].VBoolean);
-      vtChar:         s += Args[i].VChar;
-      {$ifndef FPUNONE}
-      vtExtended:     ; //  Args[i].VExtended^;
-      {$ENDIF}
-      vtString:       s += Args[i].VString^;
-      vtPointer:      ; //  Args[i].VPointer;
-      vtPChar:        s += Args[i].VPChar;
-      vtObject:       ; //  Args[i].VObject;
-      vtClass:        ; //  Args[i].VClass;
-      vtWideChar:     s += AnsiString(Args[i].VWideChar);
-      vtPWideChar:    s += AnsiString(Args[i].VPWideChar);
-      vtAnsiString:   s += AnsiString(Args[i].VAnsiString);
-      vtCurrency:     ; //  Args[i].VCurrency^);
-      vtVariant:      ; //  Args[i].VVariant^);
-      vtInterface:    ; //  Args[i].VInterface^);
-      vtWidestring:   s += AnsiString(WideString(Args[i].VWideString));
-      vtInt64:        s += IntToStr(Args[i].VInt64^);
-      vtQWord:        s += IntToStr(Args[i].VQWord^);
-      vtUnicodeString:s += AnsiString(UnicodeString(Args[i].VUnicodeString));
-    end;
-  end;
-  LogRaw(s);
+  LogRaw(Concatenate(Args));
 end;
 
 procedure TPas2jsLogger.LogLn;
@@ -635,16 +675,45 @@ begin
   LogRaw('');
 end;
 
+procedure TPas2jsLogger.LogPlain(const Msg: string);
+var
+  s: String;
+begin
+  if encoding='json' then
+    begin
+    s:=FormatJSONMsg(mtInfo,Msg,0,'',0,0);
+    DoLogRaw(s,True);
+    end
+  else
+    DoLogRaw(Msg,False);
+end;
+
+procedure TPas2jsLogger.LogPlain(Args: array of const);
+begin
+  LogPlain(Concatenate(Args));
+end;
+
 procedure TPas2jsLogger.LogMsg(MsgNumber: integer; Args: array of const;
   const Filename: string; Line: integer; Col: integer; UseFilter: boolean);
 var
-  s: String;
   Msg: TPas2jsMessage;
 begin
   Msg:=FindMsg(MsgNumber,true);
-  if UseFilter and not (Msg.Typ in FShowMsgTypes) then exit;
+  Log(Msg.Typ,SafeFormat(Msg.Pattern,Args),MsgNumber,Filename,Line,Col,UseFilter);
+end;
+
+procedure TPas2jsLogger.Log(MsgType: TMessageType; Msg: string;
+  MsgNumber: integer; const Filename: string; Line: integer; Col: integer;
+  UseFilter: boolean);
+var
+  s: String;
+begin
+  if UseFilter and not (MsgType in FShowMsgTypes) then exit;
   if MsgNumberDisabled[MsgNumber] then exit;
-  s:=FormatMsg(Msg.Typ,SafeFormat(Msg.Pattern,Args),MsgNumber,Filename,Line,Col);
+  if encoding='json' then
+    s:=FormatJSONMsg(MsgType,Msg,MsgNumber,Filename,Line,Col)
+  else
+    s:=FormatMsg(MsgType,Msg,MsgNumber,Filename,Line,Col);
   LogRaw(s);
 end;
 
@@ -666,18 +735,6 @@ begin
   mtDebug: Result:='Debug';
   else Result:='Verbose';
   end;
-end;
-
-procedure TPas2jsLogger.Log(MsgType: TMessageType; Msg: string;
-  MsgNumber: integer; const Filename: string; Line: integer; Col: integer;
-  UseFilter: boolean);
-var
-  s: String;
-begin
-  if UseFilter and not (MsgType in FShowMsgTypes) then exit;
-  if MsgNumberDisabled[MsgNumber] then exit;
-  s:=FormatMsg(MsgType,Msg,MsgNumber,Filename,Line,Col);
-  LogRaw(s);
 end;
 
 function TPas2jsLogger.FormatMsg(MsgType: TMessageType; Msg: string;
@@ -707,6 +764,33 @@ begin
     s+='('+IntToStr(MsgNumber)+') ';
   s+=Msg;
   Result:=s;
+end;
+
+function TPas2jsLogger.FormatJSONMsg(MsgType: TMessageType; Msg: string; MsgNumber: integer; const Filename: string; Line: integer;
+  Col: integer): string;
+
+Var
+  J : TJSONObject;
+  FN : String;
+
+begin
+  if Assigned(OnFormatPath) then
+    FN:=OnFormatPath(Filename)
+  else
+    FN:=Filename;
+  J:=TJSONObject.Create([
+    'message',Msg,
+    'line',Line,
+    'col',Col,
+    'number',MsgNumber,
+    'filename',FN,
+    'type',MsgTypeToStr(MsgType)
+    ]);
+  try
+    Result:=J.AsJSON;
+  finally
+    J.Free;
+  end;
 end;
 
 procedure TPas2jsLogger.OpenOutputFile;

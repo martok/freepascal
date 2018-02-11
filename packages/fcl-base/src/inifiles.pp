@@ -228,6 +228,8 @@ type
     constructor Create(const AFileName: string; AOptions : TIniFileoptions = []); overload; override;
     constructor Create(AStream: TStream; AOptions : TIniFileoptions = []); overload;
     constructor Create(AStream: TStream; AEscapeLineFeeds : Boolean); overload; deprecated 'Use Options argument instead';
+    constructor Create(AStream: TStream; ADefaultEncoding: TEncoding; AOptions : TIniFileOptions = []);
+    constructor Create(AStream: TStream; ADefaultEncoding: TEncoding; AOwnsEncoding: Boolean; AOptions : TIniFileOptions = []);
     destructor Destroy; override;
     function ReadString(const Section, Ident, Default: string): string; override;
     procedure WriteString(const Section, Ident, Value: String); override;
@@ -948,6 +950,23 @@ begin
     Create(AStream,[]);
 end;
 
+constructor TIniFile.Create(AStream: TStream; ADefaultEncoding: TEncoding;
+  AOwnsEncoding: Boolean; AOptions: TIniFileOptions);
+begin
+  FEncoding := ADefaultEncoding;
+  FOwnsEncoding := not TEncoding.IsStandardEncoding(FEncoding);
+  Create(AStream, AOptions);
+end;
+
+constructor TIniFile.Create(AStream: TStream; ADefaultEncoding: TEncoding;
+  AOptions: TIniFileOptions);
+begin
+  FEncoding := ADefaultEncoding;
+  if FEncoding <> nil then
+    FOwnsEncoding := not TEncoding.IsStandardEncoding(FEncoding);
+  Create(AStream, AOptions);
+end;
+
 constructor TIniFile.Create(AStream: TStream; AOptions: TIniFileoptions);
 
 var
@@ -960,7 +979,7 @@ begin
   slLines := TStringList.Create;
   try
     // read the ini file values
-    slLines.LoadFromStream(FStream);
+    slLines.LoadFromStream(FStream, FEncoding);
     FillSectionList(slLines);
   finally
     slLines.Free;
@@ -1321,15 +1340,12 @@ begin
       If D <> '' Then
         if not ForceDirectories(D) then
           Raise EInoutError.CreateFmt(SErrCouldNotCreatePath,[D]);
-      if FEncoding=nil then
-        slLines.SaveToFile(FFileName)
-      else
-        slLines.SaveToFile(FFileName, FEncoding);
+      slLines.SaveToFile(FFileName, FEncoding);
       end
     else if FStream <> nil then
       begin
       Fstream.Size:=0;
-      slLines.SaveToStream(FStream);
+      slLines.SaveToStream(FStream, FEncoding);
       end;
     FillSectionList(slLines);
     FDirty := false;

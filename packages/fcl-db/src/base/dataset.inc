@@ -1504,6 +1504,8 @@ procedure TDataSet.ClearFields;
 
 
 begin
+  if not (State in dsEditModes) then
+    DatabaseError(SNotEditing, Self);
   DataEvent(deCheckBrowseMode, 0);
   FreeFieldBuffers;
   InternalInitRecord(ActiveBuffer);
@@ -2133,8 +2135,6 @@ begin
 {$endif}
       // nothing found, invalidate buffer and bail out.
       ClearBuffers;
-      // Make sure that the active record is 'empty', ie: that all fields are null
-      InternalInitRecord(ActiveBuffer);
       DataEvent(deDatasetChange,0);
       exit;
       end;

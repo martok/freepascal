@@ -42,6 +42,7 @@
     <a href="#pointer">Translating pointer</a><br>
     <a href="#record">Translating record</a><br>
     <a href="#functions">Translating functions</a><br>
+    <a href="#anonymousfunctions">Translating anonymous functions</a><br>
     <a href="#passbyref">Translating passing a parameter by reference</a><br>
     <a href="#nested functions">Translating nested functions</a><br>
     <a href="#forloop">Translating for-loop</a><br>
@@ -140,6 +141,10 @@ Put + after a boolean switch option to enable it, - to disable it
   -I&lt;x&gt;   : Add &lt;x&gt; to include paths, same as -Fi
   -J...  Extra options of pas2js
    -Jc    : Write all JavaScript concatenated into the output file
+   -Je&lt;x&gt; : Encode messages as &lt;x&gt;.
+     -Jeconsole : Console codepage. Default.
+     -Jesystem  : System codepage. On non Windows console and system are the same.
+     -Jeutf-8   : Unicode UTF-8. Default when using -Fe.
    -Ji&lt;x&gt; : Insert JS file &lt;x&gt; into main JS file. E.g. -Jirtl.js. Can be given multiple times.
    -Jl    : lower case identifiers
    -Jm    : generate source maps
@@ -148,11 +153,9 @@ Put + after a boolean switch option to enable it, - to disable it
      -Jminclude : include Pascal sources in source map.
      -Jmxssiheader : start source map with XSSI protection )]}.
      -Jm- : disable generating source maps
+   -Jo&lt;x&gt; : Enable or disable extra option. The x is case insensitive:
+     -JoSearchLikeFPC : search source files like FPC, default: search case insensitive.
    -Ju&lt;x&gt; : Add &lt;x&gt; to foreign unit paths. Foreign units are not compiled.
-   -Je&lt;x&gt; : Encode messages as &lt;x&gt;.
-     -Jeconsole : Console codepage. Default.
-     -Jesystem  : System codepage. On non Windows console and system are the same.
-     -Jeutf-8   : Unicode UTF-8. Default when using -Fe.
   -l      : Write logo
   -MDelphi: Delphi 7 compatibility mode
   -MObjFPC: FPC's Object Pascal compatibility mode (default)
@@ -1761,8 +1764,9 @@ function(){
     <div class="section">
     <h2 id="functiontype">Translating function types</h2>
     JavaScript functions work like Delphi's "reference to function", which
-    means like closures. Normal functions and nested functions can simply be
-    assigned to variables.
+    means like closures, capturing outer variables.
+    Assigning a normal function or nested function to a procedural variable is
+    translated to a simple assignment.
     A Pascal method needs <b>this</b> to be the class or class instance.<br>
     Note that <i>bind</i> cannot be used, because it does not support the <i>equal</i> operator.
     Instead a wrapper is created:
@@ -1774,8 +1778,7 @@ function(){
         </tr>
         <tr>
           <td>
-<pre>Unit UnitA;
-Program MyModule;
+<pre>Program MyModule;
 type
   TMyMethod = procedure(n: integer) of object;
   TBird = class
@@ -1840,14 +1843,76 @@ rtl = {
     <ul>
     <li>You can assign a nested procedure to procedure variable.
     You don't need and you must not add the FPC "<i>is nested</i>" modifier.</li>
+    <li>A procedural typed declared as 'reference to' accepts in pas2js procedures,
+    local procedures and methods. Delphi only supports capturing procedures and methods.
+    FPC 3.0.4 does not support reference-to.</li>
     </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="anonymousfunctions">Translating anonymous functions</h2>
+    Anonymous functions are not yet supported by pas2js. The next best thing are
+    local procedures. For example:
+    <table class="sample">
+      <tbody>
+        <tr>
+          <th>Delphi</th>
+          <th>Pas2js</th>
+        </tr>
+        <tr>
+          <td>
+<pre>Program MyModule;
+type
+  TAdder = reference to function(n: integer): integer;
+
+function CreateAdder(a: integer): TAdder;
+begin
+  Result:=function(b: integer)
+    begin
+      Result:=a+b;
+    end;
+end;
+
+var
+  Adder: TAdder;
+Begin
+  Adder:=CreateAdder(3);
+  writeln(Adder(5)); // gives 8
+End.
+</pre>
+          </td>
+          <td>
+<pre>Program MyModule;
+type
+  TAdder = reference to function(n: integer): integer;
+
+function CreateAdder(a: integer): TAdder;
+  function Add(b: integer): integer;
+  begin
+    Result:=a+b;
+  end;
+begin
+  Result:=@Add;
+end;
+
+var
+  Adder: TAdder;
+Begin
+  Adder:=CreateAdder(3);
+  writeln(Adder(5)); // gives 8
+End.
+</pre>
+          </td>
+        </tr>
+      </tbody>
+    </table>
     </div>
 
     <div class="section">
     <h2 id="absolute">Translating var modifier absolute</h2>
     The absolute modifier works as an alias. That means it works FPC/Delphi
     compatible for related types like Pointer and TObject, and works
-    incompatible for unrelated types like longword and record.<br>
+    incompatible for unrelated types like longword and record (e.g. <i>var r: TPoint absolute MyLongInt</i>).<br>
     The modifier is currently only supported for local variables.
     </div>
 
@@ -2287,6 +2352,8 @@ End.
       instance can have its own value. For example <i>TExtA.Value</i> might be
       different from <i>InstanceExtA.Value</i>. Setting <i>InstanceExtA.Value</i>
       does not change <i>TExtA.Value</i>.</li>
+      <li>Const with an expression are replaced by the expression.</li>
+      <li>Const without an expression are treated as a readonly variable.</li>
       <li>Class functions and class procedures are allowed, but can only be called via the class, not via an instance.<br>
       For example you can call the class function <i>TJSString.fromCharCode()</i>, but you cannot
       call <i>aJSString.fromCharCode()</i>.</li>
@@ -2680,9 +2747,10 @@ End.
     <i>-Jminclude</i>.<br>
     <br>
     To show the generated mapping for each line you can use the tool fpc/packages/fcl-js/examples/srcmapdump.<br>
-    <li>According to the specifications sourcemap should start with the XSSI
-    (cross site script inclusion) protection header <i>)]}'</i>. If your browser
-    does not support that, disable it with <i>-JmXSSIHeader-</i>. See here the specs:
+    <li>Option -JmXSSIHeader: According to the specifications sourcemap
+    should start with the XSSI (cross site script inclusion) protection header
+    <i>)]}'</i>. If your browser does not support that,
+    disable it with <i>-JmXSSIHeader-</i>. See here the specs:
     https://docs.google.com/document/d/1U1RGAehQwRypUTovF1KRlpiOFze0b-_2gc6fAH0KY0k/edit#heading=h.h7yy76c5il9v
     </li>
     </div>

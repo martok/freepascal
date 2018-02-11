@@ -28,8 +28,8 @@ uses
 
 const
   VersionMajor = 0;
-  VersionMinor = 8;
-  VersionRelease = 45;
+  VersionMinor = 9;
+  VersionRelease = 4;
   VersionExtra = '+beta';
   DefaultConfigFile = 'pas2js.cfg';
 
@@ -946,6 +946,16 @@ begin
     HandleEPasResolve(EPasResolve(E))
   else if E is EPas2JS then
     HandleEPas2JS(EPas2JS(E))
+  else if E is EFileNotFoundError then
+  begin
+    Log.Log(mtFatal,E.Message);
+    Compiler.Terminate(ExitCodeFileNotFound);
+  end
+  else if E is EPas2jsFileCache then
+  begin
+    Log.Log(mtFatal,E.Message);
+    Compiler.Terminate(ExitCodeFileNotFound);
+  end
   else
     HandleUnknownException(E);
 end;
@@ -978,8 +988,8 @@ begin
   try
     if ShowDebug then
     begin
-      Log.LogRaw('Pas-Module:');
-      Log.LogRaw(PasModule.GetDeclaration(true));
+      Log.LogPlain('Pas-Module:');
+      Log.LogPlain(PasModule.GetDeclaration(true));
     end;
 
     // analyze
@@ -996,18 +1006,15 @@ begin
   try
     Scanner.OpenFile(PasFilename);
   except
-    on E: EScannerError do begin
-      Log.Log(Scanner.LastMsgType,Scanner.LastMsg,Scanner.LastMsgNumber,
-              Scanner.CurFilename,Scanner.CurRow,Scanner.CurColumn);
-      Compiler.Terminate(ExitCodeSyntaxError);
-    end;
+    on E: Exception do
+      HandleException(E);
   end;
 end;
 
 procedure TPas2jsCompilerFile.ParsePascal;
 begin
   if ShowDebug then
-    Log.LogRaw(['Debug: Parsing Pascal "',PasFilename,'"...']);
+    Log.LogPlain(['Debug: Parsing Pascal "',PasFilename,'"...']);
   try
     // parse Pascal
     PascalResolver.InterfaceOnly:=IsForeign;
@@ -1281,7 +1288,7 @@ begin
     // known unit
     if (aFile.PasUnitName<>'') and (CompareText(aFile.PasUnitName,UseUnitname)<>0) then
     begin
-      Log.LogRaw(['Debug: TPas2jsPasTree.FindUnit unitname MISMATCH aFile.PasUnitname="',aFile.PasUnitName,'"',
+      Log.LogPlain(['Debug: TPas2jsPasTree.FindUnit unitname MISMATCH aFile.PasUnitname="',aFile.PasUnitName,'"',
          ' Self=',FileResolver.Cache.FormatPath(PasFilename),
          ' Uses=',UseUnitname,
          ' IsForeign=',IsForeign]);
@@ -1302,7 +1309,7 @@ begin
     UseJSFilename:='';
     if (not IsForeign) then
       UseJSFilename:=FileResolver.FindUnitJSFileName(UsePasFilename);
-    //  Log.LogRaw(['Debug: TPas2jsPasTree.FindUnit Self=',FileResolver.Cache.FormatPath(PasFilename),
+    //  Log.LogPlain(['Debug: TPas2jsPasTree.FindUnit Self=',FileResolver.Cache.FormatPath(PasFilename),
     //    ' Uses=',UseUnitname,' Found="',FileResolver.Cache.FormatPath(UsePasFilename),'"',
     //    ' IsForeign=',IsForeign,' JSFile="',FileResolver.Cache.FormatPath(useJSFilename),'"']);
 
@@ -1423,12 +1430,14 @@ var
   CombinedFileWriter: TPas2JSMapper;
   SrcFileCount: integer;
   Seconds: TDateTime;
+  ok: Boolean;
 begin
   if FMainFile<>nil then
     RaiseInternalError(20170504192137,'');
   Checked:=nil;
   CombinedFileWriter:=nil;
   SrcFileCount:=0;
+  ok:=false;
   try
     // load main Pascal file
     LoadPasFile(FileCache.MainSrcFile,'',FMainFile);
@@ -1462,10 +1471,11 @@ begin
       Log.LogMsgIgnoreFilter(nLinesInFilesCompiled,
              [IntToStr(FileCache.ReadLineCounter),IntToStr(SrcFileCount),
               FormatFloat('0.0',Seconds)]);
+      ok:=true;
     end;
   finally
     Checked.Free;
-    if ExitCode<>0 then
+    if not Ok then
       Log.LogMsgIgnoreFilter(nCompilationAborted,[]);
     CombinedFileWriter.Free;
   end;
@@ -1736,7 +1746,14 @@ begin
     aJSWriter:=TJSWriter.Create(aFileWriter);
     aJSWriter.Options:=[woUseUTF8,woCompactArrayLiterals,woCompactObjectLiterals,woCompactArguments];
     aJSWriter.IndentSize:=2;
-    aJSWriter.WriteJS(aFile.JSModule);
+    try
+      aJSWriter.WriteJS(aFile.JSModule);
+    except
+      on E: Exception do begin
+        Log.LogPlain('[20180204193420] Error while creating JavaScript "'+FileCache.FormatPath(DestFilename)+'": '+E.Message);
+        Terminate(ExitCodeErrorInternal);
+      end;
+    end;
 
     if aFile.IsMainFile and (TargetPlatform=PlatformNodeJS) then
       aFileWriter.WriteFile('rtl.run();'+LineEnding,aFile.PasFilename);
@@ -1795,7 +1812,7 @@ begin
         end;
       except
         on E: Exception do begin
-          Log.LogRaw('Error: '+E.Message);
+          Log.LogPlain('Error: '+E.Message);
           Log.LogMsg(nUnableToWriteFile,[FileCache.FormatPath(DestFilename)]);
           Terminate(ExitCodeWriteError);
         end;
@@ -1819,7 +1836,7 @@ begin
           end;
         except
           on E: Exception do begin
-            Log.LogRaw('Error: '+E.Message);
+            Log.LogPlain('Error: '+E.Message);
             Log.LogMsg(nUnableToWriteFile,[FileCache.FormatPath(MapFilename)]);
             Terminate(ExitCodeWriteError);
           end;
@@ -1878,7 +1895,7 @@ end;
 
 procedure TPas2jsCompiler.RaiseInternalError(id: int64; Msg: string);
 begin
-  Log.LogRaw('['+IntToStr(id)+'] '+Msg);
+  Log.LogPlain('['+IntToStr(id)+'] '+Msg);
   raise Exception.Create(Msg);
 end;
 
@@ -2044,9 +2061,9 @@ begin
         'else':
           begin
             if IfLvl=0 then
-              CfgSyntaxError('"'+Directive+'" without ifdef');
+              CfgSyntaxError('"'+Directive+'" without #ifdef');
             if (Skip=skipElse) and (IfLvl=SkipLvl) then
-              CfgSyntaxError('"there was already an $else');;
+              CfgSyntaxError('"there was already an #else');
             if (Skip=skipIf) and (IfLvl=SkipLvl) then
             begin
               // if-block was skipped -> execute else block
@@ -2060,12 +2077,13 @@ begin
               if ShowDebug then
                 DebugCfgDirective('skip');
               Skip:=skipElse;
+              SkipLvl:=IfLvl;
             end;
           end;
         'elseif':
           begin
             if IfLvl=0 then
-              CfgSyntaxError('"'+Directive+'" without ifdef');
+              CfgSyntaxError('"'+Directive+'" without #ifdef');
             if (Skip=skipIf) and (IfLvl=SkipLvl) then
             begin
               // if-block was skipped -> try this elseif
@@ -2093,7 +2111,7 @@ begin
         'endif':
           begin
             if IfLvl=0 then
-              CfgSyntaxError('"'+Directive+'" without ifdef');
+              CfgSyntaxError('"'+Directive+'" without #ifdef');
             dec(IfLvl);
             if IfLvl<SkipLvl then
             begin
@@ -2108,7 +2126,7 @@ begin
           ParamFatal('user defined: '+copy(Line,p-PChar(Line)+1,length(Line)))
         else
           if Skip=skipNone then
-            CfgSyntaxError('unknown directive "'+Directive+'"')
+            CfgSyntaxError('unknown directive "#'+Directive+'"')
           else
             DebugCfgDirective('skipping unknown directive');
         end;
@@ -2172,7 +2190,7 @@ end;
 
 procedure TPas2jsCompiler.ParamFatal(Msg: string);
 begin
-  Log.LogRaw(['Fatal: ',Msg]);
+  Log.LogPlain(['Fatal: ',Msg]);
   Terminate(ExitCodeErrorInParams);
 end;
 
@@ -2273,7 +2291,7 @@ begin
             end;
             inc(p);
           until false;
-          Log.LogRaw(Value);
+          Log.LogPlain(Value);
           Terminate(0);
         end;
       'B','l','n':
@@ -2350,7 +2368,7 @@ begin
             begin
             Identifier:=NormalizeEncoding(String(p));
             case Identifier of
-            'console','system','utf8': Log.Encoding:=Identifier;
+            'console','system','utf8', 'json': Log.Encoding:=Identifier;
             else ParamFatal('invalid encoding "'+String(p)+'"');
             end;
             end;
@@ -2367,9 +2385,9 @@ begin
                 Delete(aFilename,length(aFilename),1);
                 if aFilename='' then
                   UnknownParam;
-                FileCache.RemoveInsertFilename(aFilename);
+                FileCache.RemoveInsertJSFilename(aFilename);
               end else
-                FileCache.AddInsertFilename(aFilename);
+                FileCache.AddInsertJSFilename(aFilename);
             end;
           'l': SetOption(coLowerCase,p^<>'-');
           'm':
@@ -3215,6 +3233,7 @@ begin
   l('     -Jeconsole : Console codepage. This is the default.');
   l('     -Jesystem  : System codepage. On non Windows console and system are the same.');
   l('     -Jeutf-8   : Unicode UTF-8. Default when using -Fe.');
+  l('     -JeJSON    : Output compiler messages as JSON. Logo etc are outputted as-is.');
   l('   -Ji<x> : Insert JS file <x> into main JS file. E.g. -Jirtl.js. Can be given multiple times. To remove a file name append a minus, e.g. -Jirtl.js-.');
   l('   -Jl    : lower case identifiers');
   l('   -Jm    : generate source maps');
@@ -3228,6 +3247,7 @@ begin
   l('   -Ju<x> : Add <x> to foreign unit paths. Foreign units are not compiled.');
   {$IFDEF EnablePas2jsPrecompiled}
   l('   -JU    : Create precompiled units in '+PrecompiledExt+' format.');
+  // ToDo: list all registered formats
   {$ENDIF}
   l('  -l      : Write logo');
   l('  -MDelphi: Delphi 7 compatibility mode');
@@ -3287,12 +3307,12 @@ begin
   if FHasShownLogo then exit;
   FHasShownLogo:=true;
   WriteVersionLine;
-  Log.LogRaw('Copyright (c) 2017 Mattias Gaertner and others');
+  Log.LogPlain('Copyright (c) 2017 Mattias Gaertner and others');
 end;
 
 procedure TPas2jsCompiler.WriteVersionLine;
 begin
-  Log.LogRaw('Pas2JS Compiler version '+GetVersion(false));
+  Log.LogPlain('Pas2JS Compiler version '+GetVersion(false));
 end;
 
 procedure TPas2jsCompiler.WriteOptions;
@@ -3366,37 +3386,37 @@ procedure TPas2jsCompiler.WriteInfo;
 begin
   WriteVersionLine;
   Log.LogLn;
-  Log.LogRaw('Compiler date      : '+GetCompiledDate);
-  Log.LogRaw('Compiler CPU target: '+GetCompiledTargetCPU);
+  Log.LogPlain('Compiler date      : '+GetCompiledDate);
+  Log.LogPlain('Compiler CPU target: '+GetCompiledTargetCPU);
   Log.LogLn;
-  Log.LogRaw('Supported targets (targets marked with ''{*}'' are under development):');
-  Log.LogRaw(['  ',PasToJsPlatformNames[PlatformBrowser],': webbrowser']);
-  Log.LogRaw(['  ',PasToJsPlatformNames[PlatformNodeJS],': Node.js']);
+  Log.LogPlain('Supported targets (targets marked with ''{*}'' are under development):');
+  Log.LogPlain(['  ',PasToJsPlatformNames[PlatformBrowser],': webbrowser']);
+  Log.LogPlain(['  ',PasToJsPlatformNames[PlatformNodeJS],': Node.js']);
   Log.LogLn;
-  Log.LogRaw('Supported CPU instruction sets:');
-  Log.LogRaw('  ECMAScript5, ECMAScript6');
+  Log.LogPlain('Supported CPU instruction sets:');
+  Log.LogPlain('  ECMAScript5, ECMAScript6');
   Log.LogLn;
-  Log.LogRaw('Recognized compiler and RTL features:');
-  Log.LogRaw('  RTTI,CLASSES,EXCEPTIONS,EXITCODE,RANDOM,DYNARRAYS,COMMANDARGS,');
-  Log.LogRaw('  UNICODESTRINGS');
+  Log.LogPlain('Recognized compiler and RTL features:');
+  Log.LogPlain('  RTTI,CLASSES,EXCEPTIONS,EXITCODE,RANDOM,DYNARRAYS,COMMANDARGS,');
+  Log.LogPlain('  UNICODESTRINGS');
   Log.LogLn;
-  Log.LogRaw('Supported Optimizations:');
-  Log.LogRaw('  EnumNumbers');
-  Log.LogRaw('  RemoveNotUsedPrivates');
+  Log.LogPlain('Supported Optimizations:');
+  Log.LogPlain('  EnumNumbers');
+  Log.LogPlain('  RemoveNotUsedPrivates');
   Log.LogLn;
-  Log.LogRaw('Supported Whole Program Optimizations:');
-  Log.LogRaw('  RemoveNotUsedDeclarations');
+  Log.LogPlain('Supported Whole Program Optimizations:');
+  Log.LogPlain('  RemoveNotUsedDeclarations');
   Log.LogLn;
-  Log.LogRaw('This program comes under the Library GNU General Public License');
-  Log.LogRaw('For more information read COPYING.FPC, included in this distribution');
+  Log.LogPlain('This program comes under the Library GNU General Public License');
+  Log.LogPlain('For more information read COPYING.FPC, included in this distribution');
   Log.LogLn;
-  Log.LogRaw('Please report bugs in our bug tracker on:');
-  Log.LogRaw('                 http://bugs.freepascal.org');
+  Log.LogPlain('Please report bugs in our bug tracker on:');
+  Log.LogPlain('                 http://bugs.freepascal.org');
   Log.LogLn;
-  Log.LogRaw('More information may be found on our WWW pages (including directions');
-  Log.LogRaw('for mailing lists useful for asking questions or discussing potential');
-  Log.LogRaw('new features, etc.):');
-  Log.LogRaw('                 http://www.freepascal.org');
+  Log.LogPlain('More information may be found on our WWW pages (including directions');
+  Log.LogPlain('for mailing lists useful for asking questions or discussing potential');
+  Log.LogPlain('new features, etc.):');
+  Log.LogPlain('                 http://www.freepascal.org');
 end;
 
 function TPas2jsCompiler.GetShownMsgTypes: TMessageTypes;
@@ -3479,7 +3499,7 @@ begin
   aFile.CreateScannerAndParser(FileCache.CreateResolver);
 
   if ShowDebug then
-    Log.LogRaw(['Debug: Opening file "',PasFilename,'"...']);
+    Log.LogPlain(['Debug: Opening file "',PasFilename,'"...']);
   // open file (beware: this changes aPasTree.FileResolver.BaseDirectory)
   aFile.OpenFile(PasFilename);
 end;

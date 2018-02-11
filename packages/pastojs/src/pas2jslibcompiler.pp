@@ -1,3 +1,18 @@
+{
+    This file is part of the Free Component Library (FCL)
+    Copyright (c) 2018  Michael Van Canneyt
+
+    Pascal to Javascript converter class.
+
+    See the file COPYING.FPC, included in this distribution,
+    for details about the copyright.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+ **********************************************************************
+}
 unit pas2jslibcompiler;
 
 {$mode objfpc}
@@ -67,7 +82,6 @@ Type
 
 Type
   PPas2JSCompiler = Pointer;
-  PStubCreator = Pointer;
 
 Procedure SetPas2JSWriteJSCallBack(P : PPas2JSCompiler; ACallBack : TWriteJSCallBack; CallBackData : Pointer); stdcall;
 Procedure SetPas2JSCompilerLogCallBack(P : PPas2JSCompiler; ACallBack : TLibLogCallBack; CallBackData : Pointer); stdcall;
@@ -175,7 +189,7 @@ begin
   if Assigned(FOnLibLogCallBack) then
     FOnLibLogCallBack(FOnLibLogData,PAnsiChar(Msg),Length(Msg))
   else if isConsole then
-    Writeln(Msg);
+    {AllowWriteln}Writeln(Msg);{AllowWriteln-}
 end;
 
 function TLibraryPas2JSCompiler.LibraryRun(ACompilerExe, AWorkingDir: PAnsiChar;

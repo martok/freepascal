@@ -152,6 +152,10 @@ const
   nContextXInvalidY = 3079;
   nConstructingClassXWithAbstractMethodY = 3080;
   nXIsNotSupported = 3081;
+  nOperatorIsNotOverloadedAOpB = 3082;
+  nIllegalQualifierAfter = 3004;
+  nIllegalQualifierInFrontOf = 3005;
+  nIllegalQualifierWithin = 3006;
 
 // resourcestring patterns of messages
 resourcestring
@@ -191,7 +195,7 @@ resourcestring
   sWrongNumberOfParametersForTypeCast = 'wrong number of parameters for type cast to %s';
   sIllegalTypeConversionTo = 'Illegal type conversion: "%s" to "%s"';
   sConstantExpressionExpected = 'Constant expression expected';
-  sLeftSideOfIsOperatorExpectsAClassButGot = 'left side of is-operator expects a class, but got %s';
+  sLeftSideOfIsOperatorExpectsAClassButGot = 'left side of is-operator expects a class, but got "%s"';
   sNotReadable = 'not readable';
   sClassPropertyAccessorMustBeStatic = 'class property accessor must be static';
   sClassPropertyAccessorMustNotBeStatic = 'class property accessor must not be static';
@@ -236,6 +240,11 @@ resourcestring
   sContextXInvalidY = '%s: invalid %s';
   sConstructingClassXWithAbstractMethodY = 'Constructing a class "%s" with abstract method "%s"';
   sXIsNotSupported = '%s is not supported';
+  sOperatorIsNotOverloadedAOpB = 'Operator is not overloaded: "%s" %s "%s"';
+  sIllegalQualifierAfter = 'illegal qualifier "%s" after "%s"';
+  sIllegalQualifierInFrontOf = 'illegal qualifier "%s" in front of "%s"';
+  sIllegalQualifierWithin = 'illegal qualifier "%s" within "%s"';
+
 
 type
   { TResolveData - base class for data stored in TPasElement.CustomData }
@@ -1152,10 +1161,12 @@ begin
       RaiseNotYetImplemented(20170530100827,Expr);
     end;
     {$IFDEF VerbosePasResEval}
+    {AllowWriteln}
     if Result<>nil then
       writeln('TResExprEvaluator.EvalBinaryExpr Left=',LeftValue.AsDebugString,' Opcode=',OpcodeStrings[Expr.OpCode],' Right=',RightValue.AsDebugString,' Result=',Result.AsDebugString)
     else
       writeln('TResExprEvaluator.EvalBinaryExpr Left=',LeftValue.AsDebugString,' Opcode=',OpcodeStrings[Expr.OpCode],' Right=',RightValue.AsDebugString,' Result not set');
+    {AllowWriteln-}
     {$ENDIF}
   finally
     ReleaseEvalValue(LeftValue);

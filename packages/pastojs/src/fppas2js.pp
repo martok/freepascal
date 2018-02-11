@@ -277,11 +277,13 @@ Works:
   - procedure argument int
 
 ToDos:
+- 'new', 'Function' -> class var use .prototype
 - btArrayLit
   a: array of jsvalue;
   a:=[];
 - bug:
   v:=a[0]  gives Local variable "a" is assigned but never used
+- setlength(dynarray)  modeswitch to create a copy
 - range checks:
   - compile time: warnings to errors
   - proc args enum, custom enum, custom int
@@ -869,6 +871,7 @@ const
   msAllPas2jsBoolSwitches = [
     bsAssertions,
     bsRangeChecks,
+    bsTypeInfo,
     bsOverflowChecks,
     bsHints,
     bsNotes,
@@ -877,6 +880,12 @@ const
     bsScopedEnums,
     bsObjectChecks
     ];
+
+  // default parser+scanner options
+  po_Pas2js = po_Resolver+[
+    po_AsmWhole,
+    po_ResolveStandardTypes,
+    po_ExtClassConstWithoutExpr];
 
   btAllJSBaseTypes = [
     btChar,
@@ -952,6 +961,7 @@ type
     procedure ResolveNameExpr(El: TPasExpr; const aName: string;
       Access: TResolvedRefAccess); override;
     procedure FinishModule(CurModule: TPasModule); override;
+    procedure FinishEnumType(El: TPasEnumType); override;
     procedure FinishSetType(El: TPasSetType); override;
     procedure FinishRecordType(El: TPasRecordType); override;
     procedure FinishClassType(El: TPasClassType); override;
@@ -2110,6 +2120,20 @@ begin
   end;
 end;
 
+procedure TPas2JSResolver.FinishEnumType(El: TPasEnumType);
+var
+  i: Integer;
+  EnumValue: TPasEnumValue;
+begin
+  inherited FinishEnumType(El);
+  for i:=0 to El.Values.Count-1 do
+    begin
+    EnumValue:=TPasEnumValue(El.Values[i]);
+    if EnumValue.Value<>nil then
+      RaiseNotYetImplemented(20180126202434,EnumValue,'enum const');
+    end;
+end;
+
 procedure TPas2JSResolver.FinishSetType(El: TPasSetType);
 var
   TypeEl: TPasType;
@@ -2258,9 +2282,14 @@ begin
     RaiseVarModifierNotSupported(ClassFieldModifiersAllowed);
     if TPasClassType(El.Parent).IsExternal then
       begin
-      // external class -> make variable external
+      // external class
+      if El.Visibility=visPublished then
+        // Note: an external class has no typeinfo
+        RaiseMsg(20170413221516,nSymbolCannotBePublished,sSymbolCannotBePublished,
+          [],El);
       if not (vmExternal in El.VarModifiers) then
         begin
+        // make variable external
         if (El.ClassType=TPasVariable) or (El.ClassType=TPasConst) then
           begin
           if El.ExportName<>nil then
@@ -2270,10 +2299,9 @@ begin
           end;
         Include(El.VarModifiers,vmExternal);
         end;
-      if El.Visibility=visPublished then
-        // Note: an external class has no typeinfo
-        RaiseMsg(20170413221516,nSymbolCannotBePublished,sSymbolCannotBePublished,
-          [],El);
+      if (El.ClassType=TPasConst) and (TPasConst(El).Expr<>nil) then
+        // external const with expression is not writable
+        TPasConst(El).IsConst:=true;
       end;
     end
   else if ParentC=TPasRecordType then
@@ -2606,11 +2634,13 @@ function TPas2JSResolver.FindExternalName(const aName: String
 begin
   Result:=TPasIdentifier(FExternalNames.Find(aName));
   {$IFDEF VerbosePasResolver}
+  {AllowWriteln}
   if (Result<>nil) and (Result.Owner<>Self) then
     begin
     writeln('TPas2JSResolver.FindExternalName Result.Owner<>Self Owner='+GetObjName(Result.Owner));
     raise Exception.Create('20170322235814');
     end;
+  {AllowWriteln-}
   {$ENDIF}
 end;
 
@@ -3610,8 +3640,10 @@ var
   i: Integer;
 begin
   inherited DoWriteStack(Index);
+  {AllowWriteln}
   for i:=0 to length(LocalVars)-1 do
     writeln('    ',i,' ',LocalVars[i].Name,': ',GetObjName(LocalVars[i].Element));
+  {AllowWriteln-}
 end;
 
 { TConvertContext }
@@ -3713,6 +3745,7 @@ begin
 end;
 
 procedure TConvertContext.WriteStack;
+{AllowWriteln}
 
   procedure W(Index: integer; AContext: TConvertContext);
   begin
@@ -3725,10 +3758,13 @@ begin
   writeln('TConvertContext.WriteStack: ');
   W(1,Self);
 end;
+{AllowWriteln-}
 
 procedure TConvertContext.DoWriteStack(Index: integer);
 begin
+  {AllowWriteln}
   writeln('  ',Index,' ',ToString);
+  {AllowWriteln-}
 end;
 
 function TConvertContext.ToString: string;
@@ -3908,7 +3944,7 @@ begin
     // add "var $mod = this;"
     IntfContext.ThisPas:=El;
     if El.CustomData is TPasModuleScope then
-      IntfContext.ScannerBoolSwitches:=TPasModuleScope(El.CustomData).ScannerBoolSwitches;
+      IntfContext.ScannerBoolSwitches:=TPasModuleScope(El.CustomData).BoolSwitches;
     ModVarName:=FBuiltInNames[pbivnModule];
     IntfContext.AddLocalVar(ModVarName,El);
     AddToSourceElements(Src,CreateVarStatement(ModVarName,
@@ -4832,6 +4868,36 @@ function TPasToJSConverter.ConvertIdentifierExpr(El: TPasExpr;
     Result:=AContext.GetSelfContext<>nil;
   end;
 
+  procedure CallImplicit(Decl: TPasElement);
+  var
+    ProcType: TPasProcedureType;
+    ResolvedEl: TPasResolverResult;
+    Call: TJSCallExpression;
+  begin
+    // create a call with default parameters
+    ProcType:=nil;
+    if Decl is TPasProcedure then
+      ProcType:=TPasProcedure(Decl).ProcType
+    else
+      begin
+      AContext.Resolver.ComputeElement(El,ResolvedEl,[rcNoImplicitProc]);
+      if ResolvedEl.TypeEl is TPasProcedureType then
+        ProcType:=TPasProcedureType(ResolvedEl.TypeEl)
+      else
+        RaiseNotSupported(El,AContext,20170217005025);
+      end;
+
+    Call:=nil;
+    try
+      CreateProcedureCall(Call,nil,ProcType,AContext);
+      Call.Expr:=Result;
+      Result:=Call;
+    finally
+      if Result<>Call then
+        Call.Free;
+    end;
+  end;
+
 var
   Decl: TPasElement;
   Name: String;
@@ -4839,10 +4905,9 @@ var
   Call: TJSCallExpression;
   BuiltInProc: TResElDataBuiltInProc;
   Prop: TPasProperty;
-  ImplicitCall: Boolean;
+  IsImplicitCall: Boolean;
   AssignContext: TAssignContext;
-  ResolvedEl: TPasResolverResult;
-  ProcType, TargetProcType: TPasProcedureType;
+  TargetProcType: TPasProcedureType;
   ArrLit: TJSArrayLiteral;
   IndexExpr: TPasExpr;
   Func: TPasFunction;
@@ -4898,7 +4963,7 @@ begin
 
   Prop:=nil;
   AssignContext:=nil;
-  ImplicitCall:=rrfImplicitCallWithoutParams in Ref.Flags;
+  IsImplicitCall:=rrfImplicitCallWithoutParams in Ref.Flags;
 
   if Decl.ClassType=TPasProperty then
     begin
@@ -4939,7 +5004,7 @@ begin
         begin
         Result:=CreatePropertyGet(Prop,Ref,AContext,El);
         if Result is TJSCallExpression then exit;
-        if not ImplicitCall then exit;
+        if not IsImplicitCall then exit;
         end;
       else
         RaiseNotSupported(El,AContext,20170213212623);
@@ -4948,7 +5013,30 @@ begin
   else if Decl.ClassType=TPasArgument then
     begin
     Result:=CreateArgumentAccess(TPasArgument(Decl),AContext,El);
+    if IsImplicitCall then
+      CallImplicit(Decl);
     exit;
+    end
+  else if Decl.ClassType=TPasConst then
+    begin
+    if TPasConst(Decl).IsConst and (TPasConst(Decl).Expr<>nil) then
+      begin
+      Value:=AContext.Resolver.Eval(TPasConst(Decl).Expr,[refConst]);
+      if (Value<>nil)
+          and (Value.Kind in [revkNil,revkBool,revkInt,revkUInt,revkFloat,revkEnum]) then
+        try
+          Result:=ConvertConstValue(Value,AContext,El);
+          exit;
+        finally
+          ReleaseEvalValue(Value);
+        end;
+      if vmExternal in TPasConst(Decl).VarModifiers then
+        begin
+        // external constant are always added by value, not by reference
+        Result:=ConvertElement(TPasConst(Decl).Expr,AContext);
+        exit;
+        end;
+      end;
     end
   else if Decl.ClassType=TPasResString then
     begin
@@ -4959,10 +5047,8 @@ begin
     Call.AddArg(CreatePrimitiveDotExpr(TransformModuleName(Decl.GetModule,true,AContext),El));
     Call.AddArg(CreateLiteralString(El,TransformVariableName(Decl,AContext)));
     exit;
-    end;
-
-  //writeln('TPasToJSConverter.ConvertPrimitiveExpression pekIdent TResolvedReference ',GetObjName(Ref.Declaration),' ',GetObjName(Ref.Declaration.CustomData));
-  if Decl.CustomData is TResElDataBuiltInProc then
+    end
+  else if Decl.CustomData is TResElDataBuiltInProc then
     begin
     BuiltInProc:=TResElDataBuiltInProc(Decl.CustomData);
     {$IFDEF VerbosePas2JS}
@@ -5021,31 +5107,8 @@ begin
   if Result=nil then
     Result:=CreatePrimitiveDotExpr(Name,El);
 
-  if ImplicitCall then
-    begin
-    // create a call with default parameters
-    ProcType:=nil;
-    if Decl is TPasProcedure then
-      ProcType:=TPasProcedure(Decl).ProcType
-    else
-      begin
-      AContext.Resolver.ComputeElement(El,ResolvedEl,[rcNoImplicitProc]);
-      if ResolvedEl.TypeEl is TPasProcedureType then
-        ProcType:=TPasProcedureType(ResolvedEl.TypeEl)
-      else
-        RaiseNotSupported(El,AContext,20170217005025);
-      end;
-
-    Call:=nil;
-    try
-      CreateProcedureCall(Call,nil,ProcType,AContext);
-      Call.Expr:=Result;
-      Result:=Call;
-    finally
-      if Result<>Call then
-        Call.Free;
-    end;
-    end;
+  if IsImplicitCall then
+    CallImplicit(Decl);
 end;
 
 function TPasToJSConverter.ConvertBoolConstExpression(El: TBoolConstExpr;
@@ -9335,11 +9398,11 @@ begin
     BodyJS:=FD.Body;
     FuncContext:=TFunctionContext.Create(ImplProc,FD.Body,AContext);
     try
-      FuncContext.ScannerBoolSwitches:=ImplProcScope.ScannerBoolSwitches;
+      FuncContext.ScannerBoolSwitches:=ImplProcScope.BoolSwitches;
       FirstSt:=nil;
       LastSt:=nil;
 
-      if (bsRangeChecks in ImplProcScope.ScannerBoolSwitches)
+      if (bsRangeChecks in ImplProcScope.BoolSwitches)
           and (AContext.Resolver<>nil) then
         for i:=0 to El.ProcType.Args.Count-1 do
           begin
@@ -9738,6 +9801,11 @@ end;
 
 function TPasToJSConverter.ConvertConstValue(Value: TResEvalValue;
   AContext: TConvertContext; El: TPasElement): TJSElement;
+var
+  Ranges: TResEvalSet.TItems;
+  Range: TResEvalSet.TItem;
+  Call: TJSCallExpression;
+  i: Integer;
 begin
   Result:=nil;
   if Value=nil then
@@ -9751,6 +9819,8 @@ begin
     Result:=CreateLiteralNumber(El,TResEvalInt(Value).Int);
   revkUInt:
     Result:=CreateLiteralNumber(El,TResEvalUInt(Value).UInt);
+  revkFloat:
+    Result:=CreateLiteralNumber(El,TResEvalFloat(Value).FloatValue);
   revkString:
     Result:=CreateLiteralString(El,TResEvalString(Value).S);
   revkUnicodeString:
@@ -9763,7 +9833,35 @@ begin
       {$IFDEF VerbosePas2JS}
       writeln('TPasToJSConverter.ConvertConstValue Value=',Value.AsDebugString,' IdentEl=',GetObjName(Value.IdentEl));
       {$ENDIF}
-      RaiseNotSupported(El,AContext,20171221125842);
+      // rtl.createSet()
+      Call:=CreateCallExpression(El);
+      try
+        Call.Expr:=CreateMemberExpression([FBuiltInNames[pbivnRTL],FBuiltInNames[pbifnSet_Create]]);
+        Ranges:=TResEvalSet(Value).Ranges;
+        for i:=0 to length(Ranges)-1 do
+          begin
+          Range:=Ranges[i];
+          {$IFDEF VerbosePas2JS}
+          writeln('TPasToJSConverter.ConvertConstValue SetLiteral ',i,' ',Range.RangeStart,'..',Range.RangeEnd);
+          {$ENDIF}
+          if Range.RangeStart=Range.RangeEnd then
+            begin
+            // add one integer
+            Call.AddArg(CreateLiteralNumber(El,Range.RangeStart));
+            end
+          else
+            begin
+            // range -> add three parameters: null,left,right
+            Call.AddArg(CreateLiteralNull(El));
+            Call.AddArg(CreateLiteralNumber(El,Range.RangeStart));
+            Call.AddArg(CreateLiteralNumber(El,Range.RangeEnd));
+            end;
+          end;
+        Result:=Call;
+      finally
+        if Result=nil then
+          Call.Free;
+      end;
       end
   else
     {$IFDEF VerbosePas2JS}

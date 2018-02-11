@@ -1154,6 +1154,8 @@ unit aoptx86;
         then
           begin
             DebugMsg(SPeepholeOptimization + 'Mov2Nop done',p);
+            { take care of the register (de)allocs following p }
+            UpdateUsedRegs(tai(p.next));
             asml.remove(p);
             p.free;
             p:=hp1;
@@ -1195,7 +1197,6 @@ unit aoptx86;
                         Result:=true;
                         exit;
                       end;
-
                   end;
               end
             else if (taicpu(p).oper[1]^.typ = top_reg) and (taicpu(hp1).oper[1]^.typ = top_reg) and
@@ -1234,8 +1235,9 @@ unit aoptx86;
                           else
                             InternalError(2018011510);
                         end;
-
-                      end;
+                      end
+                    else
+                      NewSize := S_NO;
                   S_W:
                     if (taicpu(hp1).oper[0]^.val = $ffff) then
                       begin
@@ -1258,7 +1260,9 @@ unit aoptx86;
                           else
                             InternalError(2018011511);
                         end;
-                      end;
+                      end
+                    else
+                      NewSize := S_NO;
                   else
                     NewSize := S_NO;
                 end;
@@ -1443,7 +1447,7 @@ unit aoptx86;
                       begin
                         taicpu(hp1).loadoper(0,taicpu(p).oper[0]^);
                         taicpu(hp1).loadoper(1,taicpu(p).oper[0]^);
-                        DebugMsg(SPeepholeOptimization + 'MovTestJxx2ovTestJxx done',p);
+                        DebugMsg(SPeepholeOptimization + 'MovTestJxx2MovTestJxx done',p);
                       end;
                   ReleaseUsedRegs(TmpUsedRegs);
                 end
@@ -3033,7 +3037,6 @@ unit aoptx86;
         PreMessage: string;
       begin
         Result := False;
-
         { Code size reduction by J. Gareth "Kit" Moreton }
         { Convert MOVZBQ and MOVZWQ to MOVZBL and MOVZWL respectively if it removes the REX prefix }
         if (taicpu(p).opsize in [S_BQ, S_WQ]) and
@@ -3091,6 +3094,7 @@ unit aoptx86;
         end;
       end;
 {$endif}
+
 
     procedure TX86AsmOptimizer.OptReferences;
       var
