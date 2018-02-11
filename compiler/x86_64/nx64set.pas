@@ -103,12 +103,14 @@ implementation
 
         last:=min_;
         opcgsize:=def_cgsize(opsize);
+        indexreg:=cg.makeregsize(current_asmdata.CurrAsmList,hregister,OS_ADDR);
+        cg.a_load_reg_reg(current_asmdata.CurrAsmList,opcgsize,OS_ADDR,hregister,indexreg);
         if not(jumptable_no_range) then
           begin
              { a <= x <= b <-> unsigned(x-a) <= (b-a) }
-             cg.a_op_const_reg(current_asmdata.CurrAsmList,OP_SUB,opcgsize,aint(min_),hregister);
+             cg.a_op_const_reg(current_asmdata.CurrAsmList,OP_SUB,OS_ADDR,aint(min_),indexreg);
              { case expr greater than max_ => goto elselabel }
-             cg.a_cmp_const_reg_label(current_asmdata.CurrAsmList,opcgsize,OC_A,aint(max_)-aint(min_),hregister,elselabel);
+             cg.a_cmp_const_reg_label(current_asmdata.CurrAsmList,OS_ADDR,OC_A,aint(max_)-aint(min_),indexreg,elselabel);
              min_:=0;
              { do not sign extend when we load the index register, as we applied an offset above }
              opcgsize:=tcgsize2unsigned[opcgsize];
@@ -116,8 +118,6 @@ implementation
 
         { local label in order to avoid using GOT }
         current_asmdata.getlabel(tablelabel,alt_data);
-        indexreg:=cg.makeregsize(current_asmdata.CurrAsmList,hregister,OS_ADDR);
-        cg.a_load_reg_reg(current_asmdata.CurrAsmList,opcgsize,OS_ADDR,hregister,indexreg);
         { load table address }
         reference_reset_symbol(href,tablelabel,0,4,[]);
         basereg:=cg.getaddressregister(current_asmdata.CurrAsmList);
