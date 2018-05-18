@@ -342,7 +342,7 @@ type
   end;
 
 const
-  exceptmap: array[0..29] of TExceptMapEntry = (
+  exceptmap: array[0..30] of TExceptMapEntry = (
     (code: 200; cls: EDivByZero;     msg: @SDivByZero),
     (code: 201; cls: ERangeError;    msg: @SRangeError),
     (code: 202; cls: EStackOverflow; msg: @SStackOverflow),
@@ -371,9 +371,10 @@ const
     (code: 229; cls: ESafecallException; msg: @SSafecallException),
     (code: 231; cls: EConvertError;  msg: @SiconvError),
     (code: 232; cls: ENoThreadSupport; msg: @SNoThreadSupport),
-    (code: 233; cls: ENoWideStringSupport; msg: @SSigQuit),
+    (code: 233; cls: ESigQuit; msg: @SSigQuit),
     (code: 234; cls: ENoWideStringSupport; msg: @SMissingWStringManager),
-    (code: 235; cls: ENoDynLibsSupport; msg: @SNoDynLibsSupport)
+    (code: 235; cls: ENoDynLibsSupport; msg: @SNoDynLibsSupport),
+    (code: 236; cls: EThreadError; msg: @SThreadError)
   );
 
 function FindExceptMapEntry(err: longint): PExceptMapEntry;
@@ -471,6 +472,13 @@ begin
 end;
 
 {$endif}
+
+procedure CheckOSError(LastError: Integer);
+begin
+  if LastError <> 0 then
+    RaiseLastOSError(LastError);
+end;
+
 Procedure AssertErrorHandler (Const Msg,FN : ShortString;LineNo:longint; TheAddr : pointer);
 Var
   S : String;

@@ -626,6 +626,7 @@ implementation
               if token<>_RKLAMMER then
                 p1:=sub_expr(opcompare,[ef_accept_equal],p1);
               p1:=caddrnode.create(p1);
+              include(taddrnode(p1).addrnodeflags,anf_ofs);
               got_addrn:=false;
               { Ofs() returns a cardinal/qword, not a pointer }
               inserttypeconv_internal(p1,uinttype);
@@ -2809,7 +2810,7 @@ implementation
                  searchsym(pattern,srsym,srsymtable);
                { handle unit specification like System.Writeln }
                if not isspecialize then
-                 unit_found:=try_consume_unitsym(srsym,srsymtable,t,true,allowspecialize,isspecialize)
+                 unit_found:=try_consume_unitsym(srsym,srsymtable,t,true,allowspecialize,isspecialize,pattern)
                else
                  begin
                    unit_found:=false;
@@ -3779,7 +3780,7 @@ implementation
                  p1:=caddrnode.create(p1);
                  p1.fileinfo:=filepos;
                  if cs_typed_addresses in current_settings.localswitches then
-                   include(p1.flags,nf_typedaddr);
+                   include(taddrnode(p1).addrnodeflags,anf_typedaddr);
                  { Store the procvar that we are expecting, the
                    addrn will use the information to find the correct
                    procdef or it will return an error }

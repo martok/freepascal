@@ -400,6 +400,8 @@ type
     po_auto_raised_visibility,
     { procedure is far (x86 only) }
     po_far,
+    { near/far call model is specified explicitly (x86 only) }
+    po_hasnearfarcallmodel,
     { the procedure never returns, this information is usefull for dfa }
     po_noreturn,
     { procvar is a function reference }
@@ -805,14 +807,8 @@ inherited_objectoptions : tobjectoptions = [oo_has_virtual,oo_has_private,oo_has
              oo_can_have_published];
 {$endif not jvm}
 
-{$ifdef i386}
-   { we only take this into account on i386, on other platforms we always
-     push in the same order
-   }
-   pushleftright_pocalls : tproccalloptions = [pocall_register,pocall_pascal];
-{$endif}
-{$ifdef i8086}
-   { we only take this into account on i386, on other platforms we always
+{$if defined(i8086) or defined(i386)}
+   { we only take this into account on i8086 and i386, on other platforms we always
      push in the same order
    }
    pushleftright_pocalls : tproccalloptions = [pocall_register,pocall_pascal];

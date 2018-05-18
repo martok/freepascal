@@ -180,7 +180,8 @@ const
   { 91 }  'AROS-arm',
   { 92 }  'WebAssembly-wasm',
   { 93 }  'Linux-sparc64',
-  { 94 }  'Solaris-sparc64'
+  { 94 }  'Solaris-sparc64',
+  { 95 }  'NetBSD-arm'
   );
 
 const
@@ -1989,6 +1990,7 @@ const
      (mask:po_rtlproc;         str: 'RTL procedure'),
      (mask:po_auto_raised_visibility; str: 'Visibility raised by compiler'),
      (mask:po_far;             str: 'Far'),
+     (mask:po_hasnearfarcallmodel; str: 'Near/Far explicit'),
      (mask:po_noreturn;        str: 'No return'),
      (mask:po_is_function_ref; str: 'Function reference'),
      (mask:po_is_block;        str: 'C "Block"'),

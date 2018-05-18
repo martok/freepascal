@@ -175,7 +175,7 @@ implementation
                      begin
                        consume(_LECKKLAMMER);
                        repeat
-                         if def.typ=arraydef then
+                         if assigned(def) and (def.typ=arraydef) then
                           begin
                             idx:=0;
                             p:=comp_expr([ef_accept_equal]);
@@ -414,7 +414,8 @@ implementation
                       begin
                         consume(_OF);
                         { define range and type of range }
-                        hdef:=carraydef.create(0,-1,s32inttype);
+                        hdef:=carraydef.create_openarray;
+                        hdef.owner:=astruct.symtable;
                         { define field type }
                         single_type(arraytype,[]);
                         tarraydef(hdef).elementdef:=arraytype;

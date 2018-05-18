@@ -147,10 +147,10 @@ type
       const Arg: Pointer); virtual;
     procedure ForEachChildCall(const aMethodCall: TOnForEachPasElement;
       const Arg: Pointer; Child: TPasElement; CheckParent: boolean); virtual;
-    function FullPath: string;
-    function ParentPath: string;
-    function FullName: string; virtual;         // Name including parent's names
-    function PathName: string; virtual;         // = Module.Name + FullName
+    function FullPath: string;                  // parent's names, if parent is not TPasDeclarations
+    function ParentPath: string;                // parent's names
+    function FullName: string; virtual;         // FullPath + Name
+    function PathName: string; virtual;         // = Module.Name + ParentPath
     function GetModule: TPasModule;
     function ElementTypeName: string; virtual;
     Function HintsString : String;
@@ -167,7 +167,7 @@ type
 
   TPasExprKind = (pekIdent, pekNumber, pekString, pekSet, pekNil, pekBoolConst,
      pekRange, pekUnary, pekBinary, pekFuncParams, pekArrayParams, pekListOfExp,
-     pekInherited, pekSelf);
+     pekInherited, pekSelf, pekSpecialize);
 
   TExprOpCode = (eopNone,
                  eopAdd,eopSubtract,eopMultiply,eopDivide, eopDiv,eopMod, eopPower,// arithmetic
@@ -270,15 +270,18 @@ type
   { TRecordValues }
 
   TRecordValuesItem = record
-    Name      : AnsiString;
+    Name      : String;
+    NameExp   : TPrimitiveExpr;
     ValueExp  : TPasExpr;
   end;
+  PRecordValuesItem = ^TRecordValuesItem;
+  TRecordValuesItemArray = array of TRecordValuesItem;
 
   TRecordValues = class(TPasExpr)
-    Fields    : array of TRecordValuesItem;
+    Fields    : TRecordValuesItemArray;
     constructor Create(AParent : TPasElement); overload;
     destructor Destroy; override;
-    procedure AddField(const AName: AnsiString; Value: TPasExpr);
+    procedure AddField(AName: TPrimitiveExpr; Value: TPasExpr);
     function GetDeclaration(full : Boolean) : string; override;
     procedure ForEachCall(const aMethodCall: TOnForEachPasElement;
       const Arg: Pointer); override;
@@ -657,9 +660,9 @@ type
       const Arg: Pointer); override;
   public
     PackMode: TPackMode;
-    Members: TFPList;     // array of TPasVariable elements
-    VariantEl: TPasElement; // TPasVariable or TPasType
-    Variants: TFPList;	// array of TPasVariant elements, may be nil!
+    Members: TFPList;     // list of TPasVariable elements
+    VariantEl: TPasElement; // nil or TPasVariable or TPasType
+    Variants: TFPList;	// list of TPasVariant elements, may be nil!
     GenericTemplateTypes: TFPList; // list of TPasGenericTemplateType
     Function IsPacked: Boolean;
     Function IsBitPacked : Boolean;
@@ -674,6 +677,11 @@ type
     // okSpecialize removed in FPC 3.1.1
     okClassHelper,okRecordHelper,okTypeHelper,
     okDispInterface);
+
+  TPasClassInterfaceType = (
+    citCom, // default
+    citCorba
+    );
 
   { TPasClassType }
 
@@ -695,10 +703,11 @@ type
     GUIDExpr : TPasExpr;
     Members: TFPList;     // list of TPasElement
     Modifiers: TStringList;
-    Interfaces : TFPList; // list of TPasElement
+    Interfaces : TFPList; // list of TPasType
     GenericTemplateTypes: TFPList; // list of TPasGenericTemplateType
     ExternalNameSpace : String;
     ExternalName : String;
+    InterfaceType: TPasClassInterfaceType;
     Procedure SetGenericTemplates(AList : TFPList);
     Function FindMember(MemberClass : TPTreeElement; Const MemberName : String) : TPasElement;
     Function FindMemberInAncestors(MemberClass : TPTreeElement; Const MemberName : String) : TPasElement;
@@ -757,6 +766,7 @@ type
     property IsNested : Boolean read GetIsNested write SetIsNested;
     property IsReferenceTo : Boolean Read GetIsReference write SetIsReference;
   end;
+  TPasProcedureTypeClass = class of TPasProcedureType;
 
   { TPasResultElement }
 
@@ -868,6 +878,7 @@ type
 
   TPasProperty = class(TPasVariable)
   private
+    FArgs: TFPList;
     FResolvedType : TPasType;
     function GetIsClass: boolean;
     procedure SetIsClass(AValue: boolean);
@@ -882,23 +893,28 @@ type
     IndexExpr: TPasExpr;
     ReadAccessor: TPasExpr;
     WriteAccessor: TPasExpr;
-    ImplementsFunc: TPasExpr;
     DispIDExpr : TPasExpr;   // Can be nil.
-
+    Implements: TPasExprArray;
     StoredAccessor: TPasExpr;
     DefaultExpr: TPasExpr;
-    Args: TFPList;        // List of TPasArgument objects
     ReadAccessorName: string; // not used by resolver
     WriteAccessorName: string; // not used by resolver
     ImplementsName: string; // not used by resolver
     StoredAccessorName: string; // not used by resolver
     DispIDReadOnly,
     IsDefault, IsNodefault: Boolean;
+    property Args: TFPList read FArgs; // List of TPasArgument objects
     property IsClass: boolean read GetIsClass write SetIsClass;
     Function ResolvedType : TPasType;
     Function IndexValue : String;
     Function DefaultValue : string;
   end;
+
+  TProcType = (ptProcedure, ptFunction,
+               ptOperator, ptClassOperator,
+               ptConstructor, ptDestructor,
+               ptClassProcedure, ptClassFunction,
+               ptClassConstructor, ptClassDestructor);
 
   { TPasProcedureBase }
 
@@ -973,6 +989,7 @@ type
     Property MessageName : String Read FMessageName Write FMessageName;
     property MessageType : TProcedureMessageType Read FMessageType Write FMessageType;
   end;
+  TPasProcedureClass = class of TPasProcedure;
 
   TArrayOfPasProcedure = array of TPasProcedure;
 
@@ -1084,6 +1101,18 @@ Type
       const Arg: Pointer); override;
   public
     Body: TPasImplBlock;
+  end;
+
+  { TPasMethodResolution }
+
+  TPasMethodResolution = class(TPasElement)
+  public
+    destructor Destroy; override;
+  public
+    ProcClass: TPasProcedureClass;
+    InterfaceName: TPasExpr;
+    InterfaceProc: TPasExpr;
+    ImplementationProc: TPasExpr;
   end;
 
   { TPasProcedureImpl - used by mkxmlrpc, not by pparser }
@@ -1204,6 +1233,7 @@ Type
   public
     Elements: TFPList;    // list of TPasImplElement and maybe one TPasImplCaseElse
   end;
+  TPasImplBlockClass = class of TPasImplBlock;
 
   { TPasImplStatement }
 
@@ -1370,7 +1400,7 @@ Type
 
   TPasImplSimple = class (TPasImplStatement)
   public
-    expr  : TPasExpr;
+    Expr  : TPasExpr;
     Destructor Destroy; override;
     procedure ForEachCall(const aMethodCall: TOnForEachPasElement;
       const Arg: Pointer); override;
@@ -1471,6 +1501,11 @@ const
     'object', 'class', 'interface', 'class',
     'class helper','record helper','type helper','dispinterface');
 
+  InterfaceTypeNames: array[TPasClassInterfaceType] of string = (
+    'COM',
+    'Corba'
+    );
+
   ExprKindNames : Array[TPasExprKind] of string = (
       'Ident',
       'Number',
@@ -1485,7 +1520,8 @@ const
       'ArrayParams',
       'ListOfExp',
       'Inherited',
-      'Self');
+      'Self',
+      'Specialize');
 
   OpcodeStrings : Array[TExprOpCode] of string = (
         '','+','-','*','/','div','mod','**',
@@ -1544,6 +1580,16 @@ begin
   {$IFDEF VerbosePasTreeMem}writeln('ReleaseAndNil ',El.Name,' ',El.ClassName);{$ENDIF}
   El.Release;
   El:=nil;
+end;
+
+{ TPasMethodResolution }
+
+destructor TPasMethodResolution.Destroy;
+begin
+  ReleaseAndNil(TPasElement(InterfaceName));
+  ReleaseAndNil(TPasElement(InterfaceProc));
+  ReleaseAndNil(TPasElement(ImplementationProc));
+  inherited Destroy;
 end;
 
 { TPasImplCommandBase }
@@ -2173,7 +2219,12 @@ begin
     end
   else if FRefCount=High(FRefCount) then
     begin
-    {$if defined(debugrefcount) or defined(VerbosePasTreeMem)}  Writeln('TPasElement.Released OUCH: ',Cn); {$endif}
+    {$if defined(debugrefcount) or defined(VerbosePasTreeMem)}
+    Writeln('TPasElement.Released OUCH: ',Cn);
+    {$endif}
+    {$if defined(VerbosePasResolver) or defined(VerbosePCUFiler)}
+    Writeln('TPasElement.Released : ',ClassName,' ',Name);
+    {$endif}
     raise Exception.Create('');
     end
   else
@@ -2205,7 +2256,7 @@ begin
   p := Parent;
   while Assigned(p) and not p.InheritsFrom(TPasDeclarations) do
   begin
-    if (not (p is TPasOverloadedProc)) and (Length(p.Name) > 0) then
+    if (p.Name<>'') and (Not (p is TPasOverloadedProc)) then
       if Length(Result) > 0 then
         Result := p.Name + '.' + Result
       else
@@ -2234,7 +2285,7 @@ begin
   p := Parent;
   while Assigned(p) do
   begin
-    if (Not (p is TPasOverloadedProc)) and (Length(p.Name) > 0) then
+    if (p.Name<>'') and (Not (p is TPasOverloadedProc)) then
       if Length(Result) > 0 then
         Result := p.Name + '.' + Result
       else
@@ -2462,7 +2513,7 @@ begin
     TPasElement(Values[i]).Release;
   FreeAndNil(Values);
   if Assigned(Members) then
-    ReleaseAndNil(TpasElement(Members));
+    ReleaseAndNil(TPasElement(Members));
   inherited Destroy;
 end;
 
@@ -2556,16 +2607,16 @@ var
 begin
   for i := 0 to Members.Count - 1 do
     TPasElement(Members[i]).Release;
+  FreeAndNil(Members);
   for i := 0 to Interfaces.Count - 1 do
     TPasElement(Interfaces[i]).Release;
-  FreeAndNil(Members);
+  FreeAndNil(Interfaces);
   if Assigned(AncestorType) then
-    AncestorType.Release;
+    ReleaseAndNil(TPasElement(AncestorType));
   if Assigned(HelperForType) then
-    HelperForType.Release;
+    ReleaseAndNil(TPasElement(HelperForType));
   ReleaseAndNil(TPasElement(GUIDExpr));
   FreeAndNil(Modifiers);
-  FreeAndNil(Interfaces);
   for i := 0 to GenericTemplateTypes.Count - 1 do
     TPasElement(GenericTemplateTypes[i]).Release;
   FreeAndNil(GenericTemplateTypes);
@@ -2791,15 +2842,14 @@ end;
 destructor TPasResultElement.Destroy;
 begin
   if Assigned(ResultType) then
-    ResultType.Release;
+    ReleaseAndNil(TPasElement(ResultType));
   inherited Destroy;
 end;
 
 
 destructor TPasFunctionType.Destroy;
 begin
-  if Assigned(ResultEl) then
-    ResultEl.Release;
+  ReleaseAndNil(TPasElement(ResultEl));
   inherited Destroy;
 end;
 
@@ -2845,7 +2895,7 @@ end;
 constructor TPasProperty.Create(const AName: string; AParent: TPasElement);
 begin
   inherited Create(AName, AParent);
-  Args := TFPList.Create;
+  FArgs := TFPList.Create;
 end;
 
 destructor TPasProperty.Destroy;
@@ -2854,11 +2904,13 @@ var
 begin
   for i := 0 to Args.Count - 1 do
     TPasArgument(Args[i]).Release;
-  FreeAndNil(Args);
+  FreeAndNil(FArgs);
   ReleaseAndNil(TPasElement(IndexExpr));
   ReleaseAndNil(TPasElement(ReadAccessor));
   ReleaseAndNil(TPasElement(WriteAccessor));
-  ReleaseAndNil(TPasElement(ImplementsFunc));
+  for i := 0 to length(Implements) - 1 do
+    TPasExpr(Implements[i]).Release;
+  SetLength(Implements,0);
   ReleaseAndNil(TPasElement(StoredAccessor));
   ReleaseAndNil(TPasElement(DefaultExpr));
   ReleaseAndNil(TPasElement(DispIDExpr));
@@ -3243,7 +3295,7 @@ end;
 function TPasImplBlock.AddSimple(exp:TPasExpr):TPasImplSimple;
 begin
   Result:=TPasImplSimple.Create('', Self);
-  Result.expr:=exp;
+  Result.Expr:=exp;
   AddElement(Result);
 end;
 
@@ -3624,14 +3676,14 @@ var
   i: Integer;
 begin
   inherited ForEachCall(aMethodCall, Arg);
+  for i:=0 to GenericTemplateTypes.Count-1 do
+    ForEachChildCall(aMethodCall,Arg,TPasElement(GenericTemplateTypes[i]),false);
   for i:=0 to Members.Count-1 do
     ForEachChildCall(aMethodCall,Arg,TPasElement(Members[i]),false);
   ForEachChildCall(aMethodCall,Arg,VariantEl,false);
   if Variants<>nil then
     for i:=0 to Variants.Count-1 do
       ForEachChildCall(aMethodCall,Arg,TPasElement(Variants[i]),false);
-  for i:=0 to GenericTemplateTypes.Count-1 do
-    ForEachChildCall(aMethodCall,Arg,TPasElement(GenericTemplateTypes[i]),false);
 end;
 
 function TPasRecordType.IsPacked: Boolean;
@@ -3848,7 +3900,8 @@ begin
     ForEachChildCall(aMethodCall,Arg,TPasElement(Args[i]),false);
   ForEachChildCall(aMethodCall,Arg,ReadAccessor,false);
   ForEachChildCall(aMethodCall,Arg,WriteAccessor,false);
-  ForEachChildCall(aMethodCall,Arg,ImplementsFunc,false);
+  for i:=0 to length(Implements)-1 do
+    ForEachChildCall(aMethodCall,Arg,Implements[i],false);
   ForEachChildCall(aMethodCall,Arg,StoredAccessor,false);
   ForEachChildCall(aMethodCall,Arg,DefaultExpr,false);
 end;
@@ -4779,8 +4832,12 @@ begin
   inherited ForEachCall(aMethodCall, Arg);
   for i:=0 to length(Fields)-1 do
     with Fields[i] do
+      begin
+      if NameExp<>nil then
+        ForEachChildCall(aMethodCall,Arg,NameExp,false);
       if ValueExp<>nil then
         ForEachChildCall(aMethodCall,Arg,ValueExp,false);
+      end;
 end;
 
 constructor TRecordValues.Create(AParent : TPasElement);
@@ -4798,13 +4855,15 @@ begin
   inherited Destroy;
 end;
 
-procedure TRecordValues.AddField(const AName:AnsiString;Value:TPasExpr);
+procedure TRecordValues.AddField(AName: TPrimitiveExpr; Value: TPasExpr);
 var
   i : Integer;
 begin
   i:=length(Fields);
   SetLength(Fields, i+1);
-  Fields[i].Name:=AName;
+  Fields[i].Name:=AName.Value;
+  Fields[i].NameExp:=AName;
+  AName.Parent:=Self;
   Fields[i].ValueExp:=Value;
   Value.Parent:=Self;
 end;

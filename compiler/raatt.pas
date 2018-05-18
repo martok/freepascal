@@ -794,7 +794,7 @@ unit raatt;
                  exit;
                end;
 
-             '!' :
+             '!', '~' :
                begin
                  actasmtoken:=AS_NOT;
                  c:=current_scanner.asmgetchar;
@@ -1723,7 +1723,12 @@ unit raatt;
         else
          begin
            oper.opr.typ:=OPR_CONSTANT;
+           { cast properly to avoid a range check error }
+{$if defined(AVR) or defined(i8086)}
+           oper.opr.val:=longint(l);
+{$else}
            oper.opr.val:=aint(l);
+{$endif}
          end;
       end;
 

@@ -78,9 +78,11 @@ interface
         FPrimaryGroup: string;
         FSortOrder: Integer;
         FMZExeUnifiedLogicalSegment: TMZExeUnifiedLogicalSegment;
+        FLinNumEntries: TOmfSubRecord_LINNUM_MsLink_LineNumberList;
         function GetOmfAlignment: TOmfSegmentAlignment;
       public
         constructor create(AList:TFPHashObjectList;const Aname:string;Aalign:longint;Aoptions:TObjSectionOptions);override;
+        destructor destroy;override;
         function MemPosStr(AImageBase: qword): string;override;
         property ClassName: string read FClassName;
         property OverlayName: string read FOverlayName;
@@ -90,12 +92,14 @@ interface
         property PrimaryGroup: string read FPrimaryGroup;
         property SortOrder: Integer read FSortOrder write FSortOrder;
         property MZExeUnifiedLogicalSegment: TMZExeUnifiedLogicalSegment read FMZExeUnifiedLogicalSegment write FMZExeUnifiedLogicalSegment;
+        property LinNumEntries: TOmfSubRecord_LINNUM_MsLink_LineNumberList read FLinNumEntries;
       end;
 
       { TOmfObjData }
 
       TOmfObjData = class(TObjData)
       private
+        FMainSource: TPathStr;
         class function CodeSectionName(const aname:string): string;
       public
         constructor create(const n:string);override;
@@ -106,6 +110,7 @@ interface
         function createsection(atype:TAsmSectionType;const aname:string='';aorder:TAsmSectionOrder=secorder_default):TObjSection;override;
         function reffardatasection:TObjSection;
         procedure writeReloc(Data:TRelocDataInt;len:aword;p:TObjSymbol;Reloctype:TObjRelocationType);override;
+        property MainSource: TPathStr read FMainSource;
       end;
 
       { TOmfObjOutput }
@@ -122,6 +127,7 @@ interface
         procedure AddGroup(const groupname: string; seglist: TSegmentList);
         procedure WriteSections(Data:TObjData);
         procedure WriteSectionContentAndFixups(sec: TObjSection);
+        procedure WriteLinNumRecords(sec: TOmfObjSection);
 
         procedure section_count_sections(p:TObject;arg:pointer);
         procedure WritePUBDEFs(Data: TObjData);
@@ -499,6 +505,13 @@ implementation
         inherited create(AList, Aname, Aalign, Aoptions);
         FCombination:=scPublic;
         FUse:=suUse16;
+        FLinNumEntries:=TOmfSubRecord_LINNUM_MsLink_LineNumberList.Create;
+      end;
+
+    destructor TOmfObjSection.destroy;
+      begin
+        FLinNumEntries.Free;
+        inherited destroy;
       end;
 
     function TOmfObjSection.MemPosStr(AImageBase: qword): string;
@@ -532,6 +545,7 @@ implementation
         CObjSymbol:=TOmfObjSymbol;
         CObjSection:=TOmfObjSection;
         createsectiongroup('DGROUP');
+        FMainSource:=current_module.mainsource;
       end;
 
     function TOmfObjData.sectiontype2options(atype: TAsmSectiontype): TObjSectionOptions;
@@ -732,6 +746,7 @@ implementation
           begin
             sec:=TObjSection(Data.ObjSectionList[i]);
             WriteSectionContentAndFixups(sec);
+            WriteLinNumRecords(TOmfObjSection(sec));
           end;
       end;
 
@@ -803,6 +818,36 @@ implementation
               ChunkLen:=Min(MaxChunkSize, sec.Data.size-ChunkStart);
               ChunkFixupStart:=ChunkFixupEnd+1;
             end;
+            RawRecord.Free;
+          end;
+      end;
+
+    procedure TOmfObjOutput.WriteLinNumRecords(sec: TOmfObjSection);
+      var
+        SegIndex: Integer;
+        RawRecord: TOmfRawRecord;
+        LinNumRec: TOmfRecord_LINNUM_MsLink;
+      begin
+        if (oso_data in sec.SecOptions) then
+          begin
+            if sec.Data=nil then
+              internalerror(200403073);
+            if sec.LinNumEntries.Count=0 then
+              exit;
+            SegIndex:=Segments.FindIndexOf(sec.Name);
+            RawRecord:=TOmfRawRecord.Create;
+            LinNumRec:=TOmfRecord_LINNUM_MsLink.Create;
+            LinNumRec.BaseGroup:=0;
+            LinNumRec.BaseSegment:=SegIndex;
+            LinNumRec.LineNumberList:=sec.LinNumEntries;
+
+            while LinNumRec.NextIndex<sec.LinNumEntries.Count do
+              begin
+                LinNumRec.EncodeTo(RawRecord);
+                RawRecord.WriteTo(FWriter);
+              end;
+
+            LinNumRec.Free;
             RawRecord.Free;
           end;
       end;
@@ -907,6 +952,7 @@ implementation
         RawRecord: TOmfRawRecord;
         Header: TOmfRecord_THEADR;
         Translator_COMENT: TOmfRecord_COMENT;
+        DebugFormat_COMENT: TOmfRecord_COMENT;
         LinkPassSeparator_COMENT: TOmfRecord_COMENT;
         LNamesRec: TOmfRecord_LNAMES;
         ModEnd: TOmfRecord_MODEND;
@@ -926,7 +972,10 @@ implementation
         { write header record }
         RawRecord:=TOmfRawRecord.Create;
         Header:=TOmfRecord_THEADR.Create;
-        Header.ModuleName:=Data.Name;
+        if cs_debuginfo in current_settings.moduleswitches then
+          Header.ModuleName:=TOmfObjData(Data).MainSource
+        else
+          Header.ModuleName:=Data.Name;
         Header.EncodeTo(RawRecord);
         RawRecord.WriteTo(FWriter);
         Header.Free;
@@ -939,6 +988,18 @@ implementation
         Translator_COMENT.EncodeTo(RawRecord);
         RawRecord.WriteTo(FWriter);
         Translator_COMENT.Free;
+
+        if (target_dbg.id=dbg_codeview) or
+           ((ds_dwarf_omf_linnum in current_settings.debugswitches) and
+            (target_dbg.id in [dbg_dwarf2,dbg_dwarf3,dbg_dwarf4])) then
+          begin
+            DebugFormat_COMENT:=TOmfRecord_COMENT.Create;
+            DebugFormat_COMENT.CommentClass:=CC_NewOmfExtension;
+            DebugFormat_COMENT.CommentString:='';
+            DebugFormat_COMENT.EncodeTo(RawRecord);
+            RawRecord.WriteTo(FWriter);
+            DebugFormat_COMENT.Free;
+          end;
 
         LNames.Clear;
         LNames.Add('');  { insert an empty string, which has index 1 }
@@ -1021,7 +1082,7 @@ implementation
       begin
         inherited create(AWriter);
         cobjdata:=TOmfObjData;
-        FLNames:=TOmfOrderedNameCollection.Create;
+        FLNames:=TOmfOrderedNameCollection.Create(False);
         FSegments:=TFPHashObjectList.Create;
         FSegments.Add('',nil);
         FGroups:=TFPHashObjectList.Create;
@@ -1784,7 +1845,7 @@ implementation
       begin
         inherited create;
         cobjdata:=TOmfObjData;
-        FLNames:=TOmfOrderedNameCollection.Create;
+        FLNames:=TOmfOrderedNameCollection.Create(True);
         FExtDefs:=TFPHashObjectList.Create;
         FPubDefs:=TFPHashObjectList.Create;
         FRawRecord:=TOmfRawRecord.Create;

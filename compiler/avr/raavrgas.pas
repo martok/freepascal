@@ -343,7 +343,8 @@ Unit raavrgas;
 
           AS_INTNUM,
           AS_MINUS,
-          AS_PLUS:
+          AS_PLUS,
+          AS_NOT:
             Begin
               if (actasmtoken=AS_MINUS) and
                  (actopcode in [A_LD,A_ST]) then
@@ -517,7 +518,7 @@ Unit raavrgas;
                 begin
                   oper.opr.typ:=OPR_REFERENCE;
 
-                  reference_reset_base(oper.opr.ref,tempreg,0,1,[]);
+                  reference_reset_base(oper.opr.ref,tempreg,0,ctempposinvalid,1,[]);
 
                   { add a constant expression? }
                   if actasmtoken=AS_PLUS then

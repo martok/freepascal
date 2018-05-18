@@ -38,7 +38,7 @@ type
 
    TProcedure = procedure;
 
-   TFilename = String;
+   TFileName = type string;
 
    TIntegerSet = Set of 0..SizeOf(Integer)*8-1;
 
@@ -192,6 +192,8 @@ type
    EAbstractError   = Class(Exception);
    EAssertionFailed = Class(Exception);
    EObjectCheck     = Class(Exception);
+   EThreadError     = Class(Exception);
+   ESigQuit         = Class(Exception);
 
    EPropReadOnly = class(Exception);
    EPropWriteOnly = class(Exception);

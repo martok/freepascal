@@ -62,7 +62,7 @@ Type
     Procedure Add(Const Lines : array of String);
     Procedure StartParsing;
     Procedure ParseDeclarations;
-    Procedure ParseModule;
+    Procedure ParseModule; virtual;
     procedure ResetParser;
     Procedure CheckHint(AHint : TPasMemberHint);
     Function AssertExpression(Const Msg: String; AExpr : TPasExpr; aKind : TPasExprKind; AClass : TClass) : TPasExpr;
@@ -458,7 +458,7 @@ begin
   FResolver:=TStreamResolver.Create;
   FResolver.OwnsStreams:=True;
   FScanner:=TPascalScanner.Create(FResolver);
-  FScanner.CurrentBoolSwitches:=[bsHints,bsNotes,bsWarnings];
+  FScanner.CurrentBoolSwitches:=FScanner.CurrentBoolSwitches+[bsHints,bsNotes,bsWarnings];
   CreateEngine(FEngine);
   FParser:=TTestPasParser.Create(FScanner,FResolver,FEngine);
   FSource:=TStringList.Create;

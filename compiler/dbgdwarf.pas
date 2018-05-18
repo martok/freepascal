@@ -110,6 +110,7 @@ interface
         DW_TAG_PGI_interface_block := $A020
       );
 
+{$push} 
 {$notes off}
       { Attribute names and codes.   }
       tdwarf_attribute = (DW_AT_sibling := $01,DW_AT_location := $02,
@@ -217,7 +218,7 @@ interface
         DW_AT_APPLE_major_runtime_vers := $3fe5,
         DW_AT_APPLE_runtime_class := $3fe6
       );
-{$notes on}
+{$pop}
 
       { Form names and codes.   }
       Tdwarf_form = (DW_FORM_addr := $01,DW_FORM_block2 := $03,
@@ -460,6 +461,9 @@ implementation
       cpubase,cpuinfo,cgbase,paramgr,
       fmodule,
       defutil,symtable,ppu
+{$ifdef OMFOBJSUPPORT}
+      ,dbgcodeview
+{$endif OMFOBJSUPPORT}
       ;
 
     const
@@ -562,6 +566,7 @@ implementation
       Tdwarf_calling_convention = (DW_CC_normal := $1,DW_CC_program := $2,
         DW_CC_nocall := $3,DW_CC_GNU_renesas_sh := $40, DW_CC_GNU_borland_fastcall_i386 := $41
         );
+{$push}
 {$notes off}
       { Location atom names and codes.   }
       Tdwarf_location_atom = (DW_OP_addr := $03,DW_OP_deref := $06,DW_OP_const1u := $08,
@@ -644,7 +649,7 @@ implementation
         DW_OP_HP_fltconst8 := $e3,DW_OP_HP_mod_range := $e4,
         DW_OP_HP_unmod_range := $e5,DW_OP_HP_tls := $e6
         );
-{$notes on}
+{$pop}
 
     const
       { Implementation-defined range start.   }
@@ -3453,6 +3458,10 @@ implementation
         prevlabel,
         currlabel     : tasmlabel;
       begin
+{$ifdef OMFOBJSUPPORT}
+        if ds_dwarf_omf_linnum in current_settings.debugswitches then
+          dbgcodeview.InsertLineInfo_OMF_LINNUM_MsLink(list);
+{$endif OMFOBJSUPPORT}
         { this function will always terminate the lineinfo block }
         generated_lineinfo := true;
         { if this unit only contains code without debug info (implicit init

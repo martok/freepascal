@@ -270,6 +270,9 @@ interface
         localsym : pointer;
         localsymderef : tderef;
         localsymofs : longint;
+{$ifdef x86}
+        localsegment,
+{$endif x86}
         localindexreg : tregister;
         localscale : byte;
         localgetoffset,
@@ -354,7 +357,9 @@ interface
           available on the specified CPU; this represents directives such as
           NASM's 'CPU 686' or MASM/TASM's '.686p'. Might not be supported by
           all assemblers. }
-        asd_cpu
+        asd_cpu,
+        { for the OMF object format }
+        asd_omf_linnum_line
       );
 
       TAsmSehDirective=(
@@ -362,7 +367,8 @@ interface
           ash_endprologue,ash_handler,ash_handlerdata,
           ash_eh,ash_32,ash_no32,
           ash_setframe,ash_stackalloc,ash_pushreg,
-          ash_savereg,ash_savexmm,ash_pushframe
+          ash_savereg,ash_savexmm,ash_pushframe,
+          ash_pushnv,ash_savenv
         );
 
       TSymbolPairKind = (spk_set, spk_thumb_set, spk_localentry);
@@ -391,14 +397,17 @@ interface
         { ARM }
         'thumb_func',
         'code',
-        'cpu'
+        'cpu',
+        { for the OMF object format }
+        'omf_line'
       );
       sehdirectivestr : array[TAsmSehDirective] of string[16]=(
         '.seh_proc','.seh_endproc',
         '.seh_endprologue','.seh_handler','.seh_handlerdata',
         '.seh_eh','.seh_32','seh_no32',
         '.seh_setframe','.seh_stackalloc','.seh_pushreg',
-        '.seh_savereg','.seh_savexmm','.seh_pushframe'
+        '.seh_savereg','.seh_savexmm','.seh_pushframe',
+        '.pushnv','.savenv'
       );
       symbolpairkindstr: array[TSymbolPairKind] of string[11]=(
         '.set', '.thumb_set', '.localentry'
@@ -2632,6 +2641,9 @@ implementation
                localscale:=scale;
                localgetoffset:=getoffset;
                localforceref:=forceref;
+{$ifdef x86}
+               localsegment:=NR_NO;
+{$endif x86}
              end;
            typ:=top_local;
          end;
@@ -2986,6 +2998,9 @@ implementation
                 begin
                   ppufile.getderef(localsymderef);
                   localsymofs:=ppufile.getaint;
+{$ifdef x86}
+                  localsegment:=tregister(ppufile.getlongint);
+{$endif x86}
                   localindexreg:=tregister(ppufile.getlongint);
                   localscale:=ppufile.getbyte;
                   localgetoffset:=(ppufile.getbyte<>0);
@@ -3025,6 +3040,9 @@ implementation
                 begin
                   ppufile.putderef(localsymderef);
                   ppufile.putaint(localsymofs);
+{$ifdef x86}
+                  ppufile.putlongint(longint(localsegment));
+{$endif x86}
                   ppufile.putlongint(longint(localindexreg));
                   ppufile.putbyte(localscale);
                   ppufile.putbyte(byte(localgetoffset));
@@ -3130,7 +3148,9 @@ implementation
         sd_reg,        { pushreg }
         sd_regoffset,  { savereg }
         sd_regoffset,  { savexmm }
-        sd_none        { pushframe }
+        sd_none,       { pushframe }
+        sd_reg,        { pushnv }
+        sd_none        { savenv }
       );
 
     constructor tai_seh_directive.create(_kind:TAsmSehDirective);

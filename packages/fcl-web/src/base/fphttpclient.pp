@@ -679,7 +679,7 @@ begin
     end;
   if Assigned(FCookies) then
     begin
-    L:='Cookie:';
+    L:='Cookie: ';
     For I:=0 to FCookies.Count-1 do
       begin
       If (I>0) then
@@ -816,8 +816,6 @@ function TFPCustomHTTPClient.ReadResponseHeaders: integer;
     C : String;
 
   begin
-    If Assigned(FCookies) then
-      FCookies.Clear;
     P:=Pos(':',S);
     System.Delete(S,1,P);
     Repeat
@@ -837,6 +835,8 @@ Var
   StatusLine,S : String;
 
 begin
+  If Assigned(FCookies) then
+    FCookies.Clear;
   if not ReadString(StatusLine) then
     Exit(0);
   Result:=ParseStatusLine(StatusLine);
@@ -1298,13 +1298,18 @@ end;
 
 class procedure TFPCustomHTTPClient.AddHeader(HTTPHeaders: TStrings;
   const AHeader, AValue: String);
+
 Var
-J: Integer;
+  J: Integer;
+  S : String;
+
 begin
-  j:=IndexOfHeader(HTTPHeaders,Aheader);
+  J:=IndexOfHeader(HTTPHeaders,Aheader);
+  S:=AHeader+': '+Avalue;
   if (J<>-1) then
-    HTTPHeaders.Delete(j);
-  HTTPHeaders.Add(AHeader+': '+Avalue);
+    HTTPHeaders[j]:=S
+  else
+    HTTPHeaders.Add(S);
 end;
 
 
@@ -1315,8 +1320,8 @@ Var
   L : Integer;
   H : String;
 begin
-  H:=LowerCase(Aheader);
-  l:=Length(AHeader);
+  H:=LowerCase(Aheader)+':';
+  l:=Length(H);
   Result:=HTTPHeaders.Count-1;
   While (Result>=0) and ((LowerCase(Copy(HTTPHeaders[Result],1,l)))<>h) do
     Dec(Result);

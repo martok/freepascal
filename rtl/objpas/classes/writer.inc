@@ -505,6 +505,11 @@ begin
   inherited Destroy;
 end;
 
+procedure TWriter.FlushBuffer;
+begin
+  Driver.FlushBuffer;
+end;
+
 function TWriter.CreateDriver(Stream: TStream; BufSize: Integer): TAbstractObjectWriter;
 begin
   Result := TBinaryObjectWriter.Create(Stream, BufSize);
@@ -1286,5 +1291,12 @@ end;
 procedure TWriter.WriteUnicodeString(const Value: UnicodeString);
 begin
   Driver.WriteUnicodeString(Value);
+end;
+
+{ TAbstractObjectWriter }
+
+procedure TAbstractObjectWriter.FlushBuffer;
+begin
+  // Do nothing
 end;
 

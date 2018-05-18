@@ -1,4 +1,4 @@
-{
+﻿{
     Delphi/Kylix compatibility unit: String handling routines.
 
     This file is part of the Free Pascal run time library.
@@ -15,7 +15,7 @@
 {$mode objfpc}
 {$h+}
 {$inline on}
-unit strutils;
+unit StrUtils;
 
 interface
 
@@ -33,6 +33,8 @@ Function AnsiEndsText(const ASubText, AText: string): Boolean;
 Function AnsiReplaceText(const AText, AFromText, AToText: string): string;inline;
 Function AnsiMatchText(const AText: string; const AValues: array of string): Boolean;inline;
 Function AnsiIndexText(const AText: string; const AValues: array of string): Integer;
+Function StartsText(const ASubText, AText: string): Boolean; inline;
+Function EndsText(const ASubText, AText: string): Boolean; inline;
 
 { ---------------------------------------------------------------------
     Case sensitive search/replace
@@ -44,6 +46,8 @@ Function AnsiEndsStr(const ASubText, AText: string): Boolean;
 Function AnsiReplaceStr(const AText, AFromText, AToText: string): string;inline;
 Function AnsiMatchStr(const AText: string; const AValues: array of string): Boolean;inline;
 Function AnsiIndexStr(const AText: string; const AValues: array of string): Integer;
+Function StartsStr(const ASubText, AText: string): Boolean;
+Function EndsStr(const ASubText, AText: string): Boolean;
 Function MatchStr(const AText: UnicodeString; const AValues: array of UnicodeString): Boolean;
 Function MatchText(const AText: UnicodeString; const AValues: array of UnicodeString): Boolean;
 Function IndexStr(const AText: UnicodeString; const AValues: array of UnicodeString): Integer;
@@ -193,6 +197,7 @@ function XorDecode(const Key, Source: string): string;
 function GetCmdLineArg(const Switch: string; SwitchChars: TSysCharSet): string;
 function Numb2USA(const S: string): string;
 function Hex2Dec(const S: string): Longint;
+function Hex2Dec64(const S: string): int64;
 function Dec2Numb(N: Longint; Len, Base: Byte): string;
 function Numb2Dec(S: string; Base: Byte): Longint;
 function IntToBin(Value: Longint; Digits, Spaces: Integer): string;
@@ -858,6 +863,18 @@ begin
   Result:=StrToInt(HexStr);
 end;
 
+function Hex2Dec64(const S: string): int64;
+var
+  HexStr: string;
+begin
+  if Pos('$',S)=0 then
+    HexStr:='$'+ S
+  else
+    HexStr:=S;
+  Result:=StrToInt64(HexStr);
+end;
+
+
 {
   We turn off implicit exceptions, since these routines are tested, and it 
   saves 20% codesize (and some speed) and don't throw exceptions, except maybe 
@@ -889,20 +906,25 @@ end;
 
 function AnsiStartsText(const ASubText, AText: string): Boolean;
 begin
-  if (Length(AText) >= Length(ASubText)) and (ASubText <> '') then
-    Result := AnsiStrLIComp(PChar(ASubText), PChar(AText), Length(ASubText)) = 0
-  else
-    Result := False;
+  Result := (ASubText = '') or AnsiSameText(LeftStr(AText, Length(ASubText)), ASubText);
 end;
 
 
 function AnsiEndsText(const ASubText, AText: string): Boolean;
 begin
-  if Length(AText) >= Length(ASubText) then
-    Result := AnsiStrLIComp(PChar(ASubText),
-      PChar(AText) + Length(AText) - Length(ASubText), Length(ASubText)) = 0
-  else
-    Result := False;
+  Result := (ASubText = '') or AnsiSameText(RightStr(AText, Length(ASubText)), ASubText);
+end;
+
+
+function StartsText(const ASubText, AText: string): Boolean; inline;
+begin
+  Result := AnsiStartsText(ASubText, AText);
+end;
+
+
+function EndsText(const ASubText, AText: string): Boolean;
+begin
+  Result := AnsiEndsText(ASubText, AText);
 end;
 
 
@@ -919,17 +941,11 @@ end;
 
 
 function AnsiIndexText(const AText: string; const AValues: array of string): Integer;
-
-var
-  i : Integer;
-
 begin
-  Result:=-1;
-  if (high(AValues)=-1) or (High(AValues)>MaxInt) Then
-    Exit;
-  for i:=low(AValues) to High(Avalues) do
-     if CompareText(avalues[i],atext)=0 Then
-       exit(i);  // make sure it is the first val.
+  for Result := Low(AValues) to High(AValues) do
+    if AnsiSameText(AValues[Result], AText) then
+      Exit;
+  Result := -1;
 end;
 
 
@@ -945,17 +961,29 @@ end;
 
 function AnsiStartsStr(const ASubText, AText: string): Boolean;
 begin
-  if (Length(AText) >= Length(ASubText)) and (ASubText <> '') then
-    Result := AnsiStrLComp(PChar(ASubText), PChar(AText), Length(ASubText)) = 0
-  else
-    Result := False;
+  Result := (ASubText = '') or (LeftStr(AText, Length(ASubText)) = ASubText);
 end;
 
 
 function AnsiEndsStr(const ASubText, AText: string): Boolean;
 begin
+  Result := (ASubText = '') or (RightStr(AText, Length(ASubText)) = ASubText);
+end;
+
+
+function StartsStr(const ASubText, AText: string): Boolean;
+begin
+  if (Length(AText) >= Length(ASubText)) and (ASubText <> '') then
+    Result := StrLComp(PChar(ASubText), PChar(AText), Length(ASubText)) = 0
+  else
+    Result := False;
+end;
+
+
+function EndsStr(const ASubText, AText: string): Boolean;
+begin
   if Length(AText) >= Length(ASubText) then
-    Result := AnsiStrLComp(PChar(ASubText),
+    Result := StrLComp(PChar(ASubText),
       PChar(AText) + Length(AText) - Length(ASubText), Length(ASubText)) = 0
   else
     Result := False;
@@ -1039,18 +1067,25 @@ end;
 
 function DupeString(const AText: string; ACount: Integer): string;
 
-var i,l : SizeInt;
-
+var
+  Len: SizeInt;
+  Source, Target: PByte;
+  
 begin
- result:='';
- if aCount>=0 then
-   begin
-     l:=length(atext);
-     SetLength(result,aCount*l);
-     for i:=0 to ACount-1 do
-       move(atext[1],Result[l*i+1],l);
-   end;
-end;
+  Len := Length(AText);
+  SetLength(Result, ACount * Len);
+  // Use PByte to skip implicit UniqueString, because SetLength always unique
+  Target := PByte(Result);
+  if Target = nil then // ACount = 0 or AText = ''
+    Exit;
+  // Now ACount > 0 and Len > 0
+  Source := PByte(AText);
+  repeat
+    Move(Source[0], Target[0], Len * SizeOf(Char));
+    Inc(Target, Len * SizeOf(Char));
+    Dec(ACount);
+  until ACount = 0;
+end;   
 
 function ReverseString(const AText: string): string;
 
@@ -2709,14 +2744,33 @@ end;
 
 Function isMatch(level : integer;inputstr,wilds : string; CWild, CinputWord: SizeInt;MaxInputword,maxwilds : SizeInt; Out EOS : Boolean) : Boolean;
 
+  function WildisQuestionmark : boolean;
+begin
+    Result:=CWild <= MaxWilds;
+    if Result then
+      Result:= Wilds[CWild]='?';
+  end;
+
+  function WildisStar : boolean;
+  begin
+    Result:=CWild <= MaxWilds;
+    if Result then
+      Result:= Wilds[CWild]='*';
+  end;
+
 begin
   EOS:=False;
   Result:=True;
   repeat
-    if Wilds[CWild] = '*' then { handling of '*' }
+    if WildisStar then { handling of '*' }
       begin
       inc(CWild);
-      while Wilds[CWild] = '?' do { equal to '?' }
+      if CWild>MaxWilds then
+        begin
+          EOS:=true;
+          exit;
+        end;
+      while WildisQuestionmark do { equal to '?' }
         begin
         { goto next letter }
         inc(CWild);
@@ -2724,7 +2778,7 @@ begin
         end;
       { increase until a match }
       Repeat
-        while (inputStr[CinputWord]<>Wilds[CWild]) and (CinputWord <= MaxinputWord) do
+        while (CinputWord <= MaxinputWord) and (CWild <= MaxWilds) and (inputStr[CinputWord]<>Wilds[CWild]) do
           inc(CinputWord);
         Result:=isMatch(Level+1,inputstr,wilds,CWild, CinputWord,MaxInputword,maxwilds,EOS);
         if not Result then
@@ -2734,14 +2788,14 @@ begin
         Exit;
       Continue;
       end;
-    if Wilds[CWild] = '?' then { equal to '?' }
+    if WildisQuestionmark then { equal to '?' }
       begin
       { goto next letter }
       inc(CWild);
       inc(CinputWord);
       Continue;
       end;
-    if inputStr[CinputWord] = Wilds[CWild] then { equal letters }
+    if (CinputWord>MaxinputWord) or (CWild > MaxWilds) or (inputStr[CinputWord] = Wilds[CWild]) then { equal letters }
       begin
       { goto next letter }
       inc(CWild);

@@ -37,6 +37,7 @@ const
   ExitCodeWriteError = 5;
   ExitCodeSyntaxError = 6;
   ExitCodeConverterError = 7;
+  ExitCodePCUError = 8;
 
 const
   DefaultLogMsgTypes = [mtFatal..mtDebug]; // by default show everything
@@ -58,7 +59,14 @@ type
 
   TPas2jsLogger = class
   private
+    FDebugLog: TStream;
     FEncoding: string;
+    FLastMsgCol: integer;
+    FLastMsgFile: string;
+    FLastMsgLine: integer;
+    FLastMsgNumber: integer;
+    FLastMsgTxt: string;
+    FLastMsgType: TMessageType;
     FMsgNumberDisabled: PInteger;// sorted ascending
     FMsgNumberDisabledCount: integer;
     FMsg: TFPList; // list of TPas2jsMessage
@@ -69,6 +77,7 @@ type
     FShowMsgNumbers: boolean;
     FShowMsgTypes: TMessageTypes;
     FSorted: boolean;
+    FWriteMsgToStdErr: boolean;
     function GetMsgCount: integer;
     function GetMsgNumberDisabled(MsgNumber: integer): boolean;
     function GetMsgs(Index: integer): TPas2jsMessage; inline;
@@ -107,6 +116,11 @@ type
     procedure Flush;
     procedure CloseOutputFile;
     procedure Reset;
+    procedure ClearLastMsg;
+    procedure OpenDebugLog;
+    procedure CloseDebugLog;
+    procedure DebugLogWriteLn(Msg: string); overload;
+    function GetEncodingCaption: string;
   public
     property Encoding: string read FEncoding write SetEncoding; // normalized
     property MsgCount: integer read GetMsgCount;
@@ -116,12 +130,22 @@ type
     property OutputFilename: string read FOutputFilename write SetOutputFilename;
     property ShowMsgNumbers: boolean read FShowMsgNumbers write FShowMsgNumbers;
     property ShowMsgTypes: TMessageTypes read FShowMsgTypes write FShowMsgTypes;
+    property WriteMsgToStdErr: boolean read FWriteMsgToStdErr write FWriteMsgToStdErr;
     property Sorted: boolean read FSorted write SetSorted;
-    Property OnLog : TPas2jsLogEvent Read FOnLog Write FonLog;
+    property OnLog: TPas2jsLogEvent read FOnLog write FOnLog;
+    property LastMsgType: TMessageType read FLastMsgType write FLastMsgType;
+    property LastMsgFile: string read FLastMsgFile write FLastMsgFile;
+    property LastMsgLine: integer read FLastMsgLine write FLastMsgLine;
+    property LastMsgCol: integer read FLastMsgCol write FLastMsgCol;
+    property LastMsgTxt: string read FLastMsgTxt write FLastMsgTxt;
+    property LastMsgNumber: integer read FLastMsgNumber write FLastMsgNumber;
+    property DebugLog: TStream read FDebugLog write FDebugLog;
   end;
 
 function CompareP2JMessage(Item1, Item2: Pointer): Integer;
 
+function QuoteStr(const s: string): string;
+function DeQuoteStr(const s: string): string;
 function AsString(Element: TPasElement; Full: boolean = true): string; overload;
 function AsString(Element: TJSElement): string; overload;
 function DbgString(Element: TJSElement; Indent: integer): string; overload;
@@ -140,6 +164,16 @@ var
   Msg2: TPas2jsMessage absolute Item2;
 begin
   Result:=Msg1.Number-Msg2.Number;
+end;
+
+function QuoteStr(const s: string): string;
+begin
+  Result:=AnsiQuotedStr(S,'"');
+end;
+
+function DeQuoteStr(const s: string): string;
+begin
+  Result:=AnsiDequotedStr(S,'"');
 end;
 
 function AsString(Element: TPasElement; Full: boolean): string;
@@ -495,41 +529,41 @@ begin
 end;
 
 procedure TPas2jsLogger.DoLogRaw(const Msg: string; SkipEncoding : Boolean);
-
-Var
-  S : String;
-
+var
+  S: String;
 begin
   if SkipEncoding then
     S:=Msg
-  else
-    begin
+  else begin
     if (Encoding='utf8') or (Encoding='json') then
       S:=Msg
     else if Encoding='console' then
       S:=UTF8ToConsole(Msg)
     else if Encoding='system' then
       S:=UTF8ToSystemCP(Msg)
-    else
-      begin
+    else begin
       // default: write UTF-8 to outputfile and console codepage to console
       if FOutputFile=nil then
         S:=UTF8ToConsole(Msg);
-      end;
     end;
+  end;
   //writeln('TPas2jsLogger.LogPlain "',Encoding,'" "',DbgStr(S),'"');
+  if DebugLog<>nil then
+    DebugLogWriteLn(S);
   if FOnLog<>Nil then
     FOnLog(Self,S)
   else if FOutputFile<>nil then
     FOutputFile.Write(S+LineEnding)
-  else
-    begin
+  else begin
     // prevent codepage conversion magic
     SetCodePage(RawByteString(S), CP_OEMCP, False);
     {AllowWriteln}
-    writeln(S);
+    if WriteMsgToStdErr then
+      writeln(StdErr,S)
+    else
+      writeln(S);
     {AllowWriteln-}
-    end;
+  end;
 end;
 
 function TPas2jsLogger.Concatenate(Args: array of const): string;
@@ -578,6 +612,7 @@ var
   i: Integer;
 begin
   CloseOutputFile;
+  CloseDebugLog;
   for i:=0 to FMsg.Count-1 do
     TObject(FMsg[i]).Free;
   FreeAndNil(FMsg);
@@ -662,6 +697,7 @@ end;
 
 procedure TPas2jsLogger.LogRaw(const Msg: string);
 begin
+  ClearLastMsg;
   DoLogRaw(Msg,False);
 end;
 
@@ -675,16 +711,44 @@ begin
   LogRaw('');
 end;
 
+procedure TPas2jsLogger.DebugLogWriteLn(Msg: string);
+begin
+  if FDebugLog=nil then exit;
+  Msg:=Msg+LineEnding;
+  FDebugLog.Write(Msg[1],length(Msg));
+end;
+
+function TPas2jsLogger.GetEncodingCaption: string;
+begin
+  Result:=Encoding;
+  if Result='' then
+  begin
+    if FOutputFile=nil then
+      Result:='console'
+    else
+      Result:='utf-8';
+  end;
+  if Result='console' then
+  begin
+    {$IFDEF Unix}
+    if not IsNonUTF8System then
+      Result:='utf-8';
+    {$ENDIF}
+  end;
+  if Result='utf8' then
+    Result:='utf-8';
+end;
+
 procedure TPas2jsLogger.LogPlain(const Msg: string);
 var
   s: String;
 begin
-  if encoding='json' then
-    begin
+  ClearLastMsg;
+  if Encoding='json' then
+  begin
     s:=FormatJSONMsg(mtInfo,Msg,0,'',0,0);
     DoLogRaw(s,True);
-    end
-  else
+  end else
     DoLogRaw(Msg,False);
 end;
 
@@ -714,7 +778,13 @@ begin
     s:=FormatJSONMsg(MsgType,Msg,MsgNumber,Filename,Line,Col)
   else
     s:=FormatMsg(MsgType,Msg,MsgNumber,Filename,Line,Col);
-  LogRaw(s);
+  FLastMsgType:=MsgType;
+  FLastMsgNumber:=MsgNumber;
+  FLastMsgTxt:=Msg;
+  FLastMsgFile:=Filename;
+  FLastMsgLine:=Line;
+  FLastMsgCol:=Col;
+  DoLogRaw(s,False);
 end;
 
 procedure TPas2jsLogger.LogMsgIgnoreFilter(MsgNumber: integer;
@@ -828,6 +898,28 @@ begin
   end;
   ShowMsgNumbers:=false;
   FShowMsgTypes:=DefaultLogMsgTypes;
+end;
+
+procedure TPas2jsLogger.ClearLastMsg;
+begin
+  FLastMsgType:=mtInfo;
+  FLastMsgNumber:=0;
+  FLastMsgTxt:='';
+  FLastMsgFile:='';
+  FLastMsgLine:=0;
+  FLastMsgCol:=0;
+end;
+
+procedure TPas2jsLogger.OpenDebugLog;
+const
+  DbgLogFilename = 'pas2jsdebug.log';
+begin
+  FDebugLog:=TFileStream.Create(DbgLogFilename,fmCreate or fmShareDenyNone);
+end;
+
+procedure TPas2jsLogger.CloseDebugLog;
+begin
+  FreeAndNil(FDebugLog);
 end;
 
 end.

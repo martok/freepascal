@@ -80,7 +80,7 @@ interface
 
        tunitsym = class(Tstoredsym)
           module : tobject; { tmodule }
-          constructor create(const n : string;amodule : tobject);virtual;
+          constructor create(const n : string;amodule : tobject;doregister:boolean);virtual;
           constructor ppuload(ppufile:tcompilerppufile);
           destructor destroy;override;
           { do not override this routine in platform-specific subclasses,
@@ -690,9 +690,9 @@ implementation
                                   TUNITSYM
 ****************************************************************************}
 
-    constructor tunitsym.create(const n : string;amodule : tobject);
+    constructor tunitsym.create(const n : string;amodule : tobject;doregister:boolean);
       begin
-         inherited create(unitsym,n,true);
+         inherited create(unitsym,n,doregister);
          module:=amodule;
       end;
 
@@ -1672,7 +1672,6 @@ implementation
                 not(pi_has_assembler_block in current_procinfo.flags) and
                 not(pi_uses_exceptions in current_procinfo.flags) and
                 not(pi_has_interproclabel in current_procinfo.flags) and
-                not(vo_has_local_copy in varoptions) and
                 ((refpara and
                   (varregable <> vr_none)) or
                  (not refpara and

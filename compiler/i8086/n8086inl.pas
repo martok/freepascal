@@ -104,7 +104,7 @@ implementation
 
      function ti8086inlinenode.typecheck_seg: tnode;
        var
-         isprocvar: Boolean;
+         isprocvar,need_conv_to_voidptr: Boolean;
          procpointertype: tdef;
          hsym: tfieldvarsym;
        begin
@@ -131,12 +131,17 @@ implementation
             ) then
            begin
              isprocvar:=(left.resultdef.typ=procvardef);
+             need_conv_to_voidptr:=
+               (m_tp_procvar in current_settings.modeswitches) or
+               (m_mac_procvar in current_settings.modeswitches);
 
              if not isprocvar then
                begin
                  if current_settings.x86memorymodel in x86_far_code_models then
                    begin
                      left:=ctypeconvnode.create_proc_to_procvar(left);
+                     if need_conv_to_voidptr then
+                       include(ttypeconvnode(left).convnodeflags,tcnf_proc_2_procvar_2_voidpointer);
                      left.fileinfo:=fileinfo;
                      typecheckpass(left);
                    end
@@ -145,8 +150,7 @@ implementation
                end;
 
              { In tp procvar mode for methodpointers we need to load the proc field }
-             if (m_tp_procvar in current_settings.modeswitches) or
-                (m_mac_procvar in current_settings.modeswitches) then
+             if need_conv_to_voidptr then
                begin
                  if not tabstractprocdef(left.resultdef).is_addressonly then
                    begin
@@ -197,13 +201,21 @@ implementation
          if left.resultdef.typ=procvardef then
            begin
              if left.resultdef.size<>4 then
-               internalerror(2017121302);
+               CGMessage(type_e_seg_procvardef_wrong_memory_model);
              case left.location.loc of
                LOC_REGISTER,LOC_CREGISTER:
                  begin
                    location_reset(location,LOC_REGISTER,OS_16);
                    location.register:=cg.GetNextReg(left.location.register);
                  end;
+               LOC_CREFERENCE,LOC_REFERENCE:
+                  begin
+                    location_reset(location,LOC_REGISTER,OS_16);
+                    segref:=left.location.reference;
+                    inc(segref.offset,2);
+                    location.register:=cg.getintregister(current_asmdata.CurrAsmList,OS_16);
+                    current_asmdata.CurrAsmList.concat(Taicpu.op_ref_reg(A_MOV,S_W,segref,location.register));
+                  end;
                else
                  internalerror(2017121301);
              end;

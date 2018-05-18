@@ -32,7 +32,7 @@ const
   nErrInvalidPPElse = 1005;
   nErrInvalidPPEndif = 1006;
   nLogOpeningFile = 1007;
-  nLogLineNumber = 1008;
+  nLogLineNumber = 1008; // same as FPC
   nLogIFDefAccepted = 1009;
   nLogIFDefRejected = 1010;
   nLogIFNDefAccepted = 1011;
@@ -264,7 +264,6 @@ type
     msISOLikeMod,          { mod operation as it is required by an iso compatible compiler }
     msExternalClass,       { Allow external class definitions }
     msPrefixedAttributes,  { Allow attributes, disable proc modifier [] }
-    msIgnoreInterfaces,    { workaround til resolver/converter supports interfaces }
     msIgnoreAttributes     { workaround til resolver/converter supports attributes }
   );
   TModeSwitches = Set of TModeSwitch;
@@ -288,7 +287,7 @@ type
                       // N
     bsOptimization,   // O   enable safe optimizations (-O1)
     bsOpenStrings,    // P   deprecated Delphi directive
-    bsOverflowChecks, // Q
+    bsOverflowChecks, // Q   or $OV
     bsRangeChecks,    // R
                       // S
     bsTypedAddress,   // T   enabled: @variable gives typed pointer, otherwise untyped pointer
@@ -303,7 +302,8 @@ type
     bsWarnings,
     bsMacro,
     bsScopedEnums,
-    bsObjectChecks    // check methods 'Self' and object type casts
+    bsObjectChecks,   // check methods 'Self' and object type casts
+    bsPointerMath     // pointer arithmetic
     );
   TBoolSwitches = set of TBoolSwitch;
 const
@@ -337,8 +337,21 @@ const
     );
 
   bsAll = [low(TBoolSwitch)..high(TBoolSwitch)];
-  FPCModeBoolSwitches = [bsAlign..bsReferenceInfo,
-                         bsHints,bsNotes,bsWarnings,bsMacro,bsScopedEnums];
+  bsFPCMode: TBoolSwitches = [bsPointerMath,bsWriteableConst];
+  bsObjFPCMode: TBoolSwitches = [bsPointerMath,bsWriteableConst];
+  bsDelphiMode: TBoolSwitches = [bsWriteableConst];
+  bsDelphiUnicodeMode: TBoolSwitches = [bsWriteableConst];
+  bsMacPasMode: TBoolSwitches = [bsPointerMath,bsWriteableConst];
+
+type
+  TValueSwitch = (
+    vsInterfaces
+    );
+  TValueSwitches = set of TValueSwitch;
+  TValueSwitchArray = array[TValueSwitch] of string;
+const
+  vsAllValueSwitches = [low(TValueSwitch)..high(TValueSwitch)];
+  DefaultVSInterfaces = 'com';
 
 type
   TTokenOption = (toForceCaret,toOperatorToken);
@@ -558,10 +571,11 @@ type
     po_KeepClassForward,     // disabled: delete class fowards when there is a class declaration
     po_ArrayRangeExpr,       // enable: create TPasArrayType.IndexRange, disable: create TPasArrayType.Ranges
     po_SelfToken,            // Self is a token. For backward compatibility.
-    po_CheckModeSwitches,    // stop on unknown modeswitch with an error
-    po_CheckCondFunction,    // stop on unknown function in conditional expression, default: return '0'
-    po_StopOnErrorDirective, // stop on user $Error, $message error|fatal
-    po_ExtClassConstWithoutExpr // allow const without expression in external class
+    po_CheckModeSwitches,    // error on unknown modeswitch with an error
+    po_CheckCondFunction,    // error on unknown function in conditional expression, default: return '0'
+    po_StopOnErrorDirective, // error on user $Error, $message error|fatal
+    po_ExtConstWithoutExpr,  // allow typed const without expression in external class and with external modifier
+    po_StopOnUnitInterface   // parse only a unit name and stop at interface keyword
     );
   TPOptions = set of TPOption;
 
@@ -588,9 +602,11 @@ type
     FAllowedBoolSwitches: TBoolSwitches;
     FAllowedModes: TModeSwitches;
     FAllowedModeSwitches: TModeSwitches;
+    FAllowedValueSwitches: TValueSwitches;
     FConditionEval: TCondDirectiveEvaluator;
     FCurrentBoolSwitches: TBoolSwitches;
     FCurrentModeSwitches: TModeSwitches;
+    FCurrentValueSwitches: TValueSwitchArray;
     FCurTokenPos: TPasSourcePos;
     FLastMsg: string;
     FLastMsgArgs: TMessageArgs;
@@ -617,6 +633,7 @@ type
     FPreviousToken: TToken;
     FReadOnlyBoolSwitches: TBoolSwitches;
     FReadOnlyModeSwitches: TModeSwitches;
+    FReadOnlyValueSwitches: TValueSwitches;
     FSkipComments: Boolean;
     FSkipWhiteSpace: Boolean;
     FTokenOptions: TTokenOptions;
@@ -631,6 +648,7 @@ type
     PPSkipModeStack: array[0..255] of TPascalScannerPPSkipMode;
     PPIsSkippingStack: array[0..255] of Boolean;
     function GetCurColumn: Integer;
+    function GetCurrentValueSwitch(V: TValueSwitch): string;
     function GetForceCaret: Boolean;
     function GetMacrosOn: boolean;
     function OnCondEvalFunction(Sender: TCondDirectiveEvaluator; Name,
@@ -641,10 +659,12 @@ type
       Value: string): boolean;
     procedure SetAllowedBoolSwitches(const AValue: TBoolSwitches);
     procedure SetAllowedModeSwitches(const AValue: TModeSwitches);
+    procedure SetAllowedValueSwitches(const AValue: TValueSwitches);
     procedure SetMacrosOn(const AValue: boolean);
     procedure SetOptions(AValue: TPOptions);
     procedure SetReadOnlyBoolSwitches(const AValue: TBoolSwitches);
     procedure SetReadOnlyModeSwitches(const AValue: TModeSwitches);
+    procedure SetReadOnlyValueSwitches(const AValue: TValueSwitches);
   protected
     function FetchLine: boolean;
     procedure AddFile(aFilename: string); virtual;
@@ -674,6 +694,7 @@ type
     procedure HandleMode(const Param: String);virtual;
     procedure HandleModeSwitch(const Param: String);virtual;
     function HandleMacro(AIndex: integer): TToken;virtual;
+    procedure HandleInterfaces(const Param: String);virtual;
     procedure PushStackItem; virtual;
     function DoFetchTextToken: TToken;
     function DoFetchToken: TToken;
@@ -682,6 +703,7 @@ type
     Procedure SetCurTokenString(AValue : string);
     procedure SetCurrentBoolSwitches(const AValue: TBoolSwitches); virtual;
     procedure SetCurrentModeSwitches(AValue: TModeSwitches); virtual;
+    procedure SetCurrentValueSwitch(V: TValueSwitch; const AValue: string);
     function LogEvent(E : TPScannerLogEvent) : Boolean; inline;
   public
     constructor Create(AFileResolver: TBaseFileResolver);
@@ -729,10 +751,14 @@ type
     property AllowedBoolSwitches: TBoolSwitches read FAllowedBoolSwitches Write SetAllowedBoolSwitches;
     property ReadOnlyBoolSwitches: TBoolSwitches read FReadOnlyBoolSwitches Write SetReadOnlyBoolSwitches;// cannot be changed by code
     property CurrentBoolSwitches: TBoolSwitches read FCurrentBoolSwitches Write SetCurrentBoolSwitches;
+    property AllowedValueSwitches: TValueSwitches read FAllowedValueSwitches Write SetAllowedValueSwitches;
+    property ReadOnlyValueSwitches: TValueSwitches read FReadOnlyValueSwitches Write SetReadOnlyValueSwitches;// cannot be changed by code
+    property CurrentValueSwitch[V: TValueSwitch]: string read GetCurrentValueSwitch Write SetCurrentValueSwitch;
     property Options : TPOptions read FOptions write SetOptions;
     Property SkipWhiteSpace : Boolean Read FSkipWhiteSpace Write FSkipWhiteSpace;
     Property SkipComments : Boolean Read FSkipComments Write FSkipComments;
     property ForceCaret : Boolean read GetForceCaret;
+
     property LogEvents : TPScannerLogEvents read FLogEvents write FLogEvents;
     property OnLog : TPScannerLogHandler read FOnLog write FOnLog;
     property OnFormatPath: TPScannerFormatPathEvent read FOnFormatPath write FOnFormatPath;
@@ -912,7 +938,6 @@ const
     'ISOMOD',
     'EXTERNALCLASS',
     'PREFIXEDATTRIBUTES',
-    'IGNOREINTERFACES',
     'IGNOREATTRIBUTES'
     );
 
@@ -975,7 +1000,12 @@ const
     'Warnings',
     'Macro',
     'ScopedEnums',
-    'ObjectChecks'
+    'ObjectChecks',
+    'PointerMath'
+    );
+
+  ValueSwitchNames: array[TValueSwitch] of string = (
+    'Interfaces'
     );
 
 const
@@ -1002,6 +1032,7 @@ const
   // mode switches of $mode FPC, don't confuse with msAllFPCModeSwitches
   FPCModeSwitches = [msFpc,msStringPchar,msNestedComment,msRepeatForward,
     msCVarSupport,msInitFinal,msHintDirective,msProperty,msDefaultInline];
+  //FPCBoolSwitches bsObjectChecks
 
   OBJFPCModeSwitches =  [msObjfpc,msClass,msObjpas,msResult,msStringPchar,msNestedComment,
     msRepeatForward,msCVarSupport,msInitFinal,msOut,msDefaultPara,msHintDirective,
@@ -2312,11 +2343,15 @@ begin
   FIncludeStack := TFPList.Create;
   FDefines := CS;
   FMacros:=CS;
+
   FAllowedModes:=AllLanguageModes;
   FCurrentModeSwitches:=FPCModeSwitches;
   FAllowedModeSwitches:=msAllFPCModeSwitches;
-  FCurrentBoolSwitches:=[];
-  FAllowedBoolSwitches:=FPCModeBoolSwitches;
+  FCurrentBoolSwitches:=bsFPCMode;
+  FAllowedBoolSwitches:=bsAll;
+  FAllowedValueSwitches:=vsAllValueSwitches;
+  FCurrentValueSwitches[vsInterfaces]:=DefaultVSInterfaces;
+
   FConditionEval:=TCondDirectiveEvaluator.Create;
   FConditionEval.OnLog:=@OnCondEvalLog;
   FConditionEval.OnEvalVariable:=@OnCondEvalVar;
@@ -2702,6 +2737,33 @@ begin
 //  Writeln(Result,Curtoken);
 end;
 
+procedure TPascalScanner.HandleInterfaces(const Param: String);
+var
+  s, NewValue: String;
+  p: SizeInt;
+begin
+  if not (vsInterfaces in AllowedValueSwitches) then
+    Error(nWarnIllegalCompilerDirectiveX,sWarnIllegalCompilerDirectiveX,['interfaces']);
+  s:=Uppercase(Param);
+  p:=Pos(' ',s);
+  if p>0 then
+    s:=LeftStr(s,p-1);
+  case s of
+  'COM','DEFAULT': NewValue:='COM';
+  'CORBA': NewValue:='CORBA';
+  else
+    Error(nWarnIllegalCompilerDirectiveX,sWarnIllegalCompilerDirectiveX,['interfaces '+s]);
+    exit;
+  end;
+  if SameText(NewValue,CurrentValueSwitch[vsInterfaces]) then exit;
+  if vsInterfaces in ReadOnlyValueSwitches then
+    begin
+    Error(nWarnIllegalCompilerDirectiveX,sWarnIllegalCompilerDirectiveX,['interfaces']);
+    exit;
+    end;
+  CurrentValueSwitch[vsInterfaces]:=NewValue;
+end;
+
 procedure TPascalScanner.HandleDefine(Param: String);
 
 Var
@@ -2780,12 +2842,17 @@ end;
 
 procedure TPascalScanner.HandleMode(const Param: String);
 
-  procedure SetMode(const LangMode: TModeSwitch; const NewModeSwitches: TModeSwitches;
-    IsDelphi: boolean);
+  procedure SetMode(const LangMode: TModeSwitch;
+    const NewModeSwitches: TModeSwitches; IsDelphi: boolean;
+    const AddBoolSwitches: TBoolSwitches = [];
+    const RemoveBoolSwitches: TBoolSwitches = []
+    );
   begin
     if not (LangMode in AllowedModeSwitches) then
       Error(nErrInvalidMode,SErrInvalidMode,[Param]);
     CurrentModeSwitches:=(NewModeSwitches+ReadOnlyModeSwitches)*AllowedModeSwitches;
+    CurrentBoolSwitches:=CurrentBoolSwitches+(AddBoolSwitches*AllowedBoolSwitches)
+      -(RemoveBoolSwitches*AllowedBoolSwitches);
     if IsDelphi then
       FOptions:=FOptions+[po_delphi]
     else
@@ -2799,17 +2866,17 @@ begin
   P:=UpperCase(Param);
   Case P of
   'FPC','DEFAULT':
-    SetMode(msFpc,FPCModeSwitches,false);
+    SetMode(msFpc,FPCModeSwitches,false,bsFPCMode);
   'OBJFPC':
-    SetMode(msObjfpc,OBJFPCModeSwitches,true);
+    SetMode(msObjfpc,OBJFPCModeSwitches,true,bsObjFPCMode);
   'DELPHI':
-    SetMode(msDelphi,DelphiModeSwitches,true);
+    SetMode(msDelphi,DelphiModeSwitches,true,bsDelphiMode,[bsPointerMath]);
   'DELPHIUNICODE':
-    SetMode(msDelphiUnicode,DelphiUnicodeModeSwitches,true);
+    SetMode(msDelphiUnicode,DelphiUnicodeModeSwitches,true,bsDelphiUnicodeMode,[bsPointerMath]);
   'TP':
     SetMode(msTP7,TPModeSwitches,false);
   'MACPAS':
-    SetMode(msMac,MacModeSwitches,false);
+    SetMode(msMac,MacModeSwitches,false,bsMacPasMode);
   'ISO':
     SetMode(msIso,ISOModeSwitches,false);
   'EXTENDED':
@@ -3081,6 +3148,10 @@ begin
           DoBoolDirective(bsHints);
         'I','INCLUDE':
           Result:=HandleInclude(Param);
+        'INTERFACES':
+          HandleInterfaces(Param);
+        'LONGSTRINGS':
+          DoBoolDirective(bsLongStrings);
         'MACRO':
           DoBoolDirective(bsMacro);
         'MESSAGE':
@@ -3093,8 +3164,18 @@ begin
           DoLog(mtNote,nUserDefined,SUserDefined,[Param]);
         'NOTES':
           DoBoolDirective(bsNotes);
+        'OBJECTCHECKS':
+          DoBoolDirective(bsObjectChecks);
+        'OVERFLOWCHECKS','OV':
+          DoBoolDirective(bsOverflowChecks);
+        'POINTERMATH':
+          DoBoolDirective(bsPointerMath);
+        'RANGECHECKS':
+          DoBoolDirective(bsRangeChecks);
         'SCOPEDENUMS':
           DoBoolDirective(bsScopedEnums);
+        'TYPEDADDRESS':
+          DoBoolDirective(bsTypedAddress);
         'TYPEINFO':
           DoBoolDirective(bsTypeInfo);
         'UNDEF':
@@ -3103,6 +3184,8 @@ begin
           DoLog(mtWarning,nUserDefined,SUserDefined,[Param]);
         'WARNINGS':
           DoBoolDirective(bsWarnings);
+        'WRITEABLECONST':
+          DoBoolDirective(bsWriteableConst);
       else
         Handled:=false;
       end;
@@ -3644,6 +3727,11 @@ begin
     Result := 1;
 end;
 
+function TPascalScanner.GetCurrentValueSwitch(V: TValueSwitch): string;
+begin
+  Result:=FCurrentValueSwitches[V];
+end;
+
 function TPascalScanner.GetForceCaret: Boolean;
 begin
   Result:=toForceCaret in FTokenOptions;
@@ -3769,6 +3857,12 @@ begin
   CurrentModeSwitches:=FCurrentModeSwitches*AllowedModeSwitches;
 end;
 
+procedure TPascalScanner.SetAllowedValueSwitches(const AValue: TValueSwitches);
+begin
+  if FAllowedValueSwitches=AValue then Exit;
+  FAllowedValueSwitches:=AValue;
+end;
+
 procedure TPascalScanner.SetCurrentBoolSwitches(const AValue: TBoolSwitches);
 begin
   if FCurrentBoolSwitches=AValue then Exit;
@@ -3805,6 +3899,14 @@ begin
     UnDefine(LetterSwitchNames['H'],true);
     Exclude(FCurrentBoolSwitches,bsLongStrings);
     end;
+end;
+
+procedure TPascalScanner.SetCurrentValueSwitch(V: TValueSwitch;
+  const AValue: string);
+begin
+  if not (V in AllowedValueSwitches) then exit;
+  if FCurrentValueSwitches[V]=AValue then exit;
+  FCurrentValueSwitches[V]:=AValue;
 end;
 
 procedure TPascalScanner.SetMacrosOn(const AValue: boolean);
@@ -3870,6 +3972,12 @@ begin
   FReadOnlyModeSwitches:=AValue;
   FAllowedModeSwitches:=FAllowedModeSwitches+FReadOnlyModeSwitches;
   FCurrentModeSwitches:=FCurrentModeSwitches+FReadOnlyModeSwitches;
+end;
+
+procedure TPascalScanner.SetReadOnlyValueSwitches(const AValue: TValueSwitches);
+begin
+  if FReadOnlyValueSwitches=AValue then Exit;
+  FReadOnlyValueSwitches:=AValue;
 end;
 
 

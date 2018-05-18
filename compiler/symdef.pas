@@ -517,6 +517,7 @@ interface
           function elecount : asizeuint;
           constructor create_from_pointer(def:tpointerdef);virtual;
           constructor create(l,h:asizeint;def:tdef);virtual;
+          constructor create_openarray;virtual;
           class function getreusable(def: tdef; elems: asizeint): tarraydef; virtual;
           { same as above, but in case the def must never be freed after the
             current module has been compiled -- even if the def was not written
@@ -633,6 +634,8 @@ interface
           function stack_tainting_parameter(side: tcallercallee): boolean;
           function is_pushleftright: boolean;virtual;
           function address_type:tdef;virtual;
+          { address type, generated for ofs() }
+          function ofs_address_type:tdef;virtual;
           procedure declared_far;virtual;
           procedure declared_near;virtual;
        private
@@ -739,7 +742,7 @@ interface
          function Getforwarddef: boolean;
          procedure Setforwarddef(AValue: boolean);
          function Getinterfacedef: boolean;
-         procedure Setinterfacedef(AValue: boolean);
+         procedure Setinterfacedef(AValue: boolean);virtual;
          function Gethasforward: boolean;
          procedure Sethasforward(AValue: boolean);
          function GetIsEmpty: boolean;
@@ -3616,6 +3619,12 @@ implementation
       end;
 
 
+    constructor tarraydef.create_openarray;
+      begin
+        self.create(0,-1,sizesinttype)
+      end;
+
+
     class function tarraydef.getreusable(def: tdef; elems: asizeint): tarraydef;
       var
         res: PHashSetItem;
@@ -3650,6 +3659,7 @@ implementation
         result:=tarraydef(res^.Data);
       end;
 
+
     class function tarraydef.getreusable_no_free(def: tdef; elems: asizeint): tarraydef;
       begin
         result:=getreusable(def,elems);
@@ -3664,6 +3674,7 @@ implementation
         symtable:=nil;
         inherited;
       end;
+
 
     constructor tarraydef.create_from_pointer(def:tpointerdef);
       begin
@@ -5213,6 +5224,12 @@ implementation
       end;
 
 
+    function tabstractprocdef.ofs_address_type:tdef;
+      begin
+        result:=address_type;
+      end;
+
+
     procedure tabstractprocdef.declared_far;
       begin
         Message1(parser_w_proc_directive_ignored,'FAR');
@@ -5835,6 +5852,8 @@ implementation
         else if po_is_block in procoptions then
           s:=s+' is block';
         s:=s+';';
+        if po_far in procoptions then
+          s:=s+' far;';
         { forced calling convention? }
         if (po_hascallingconvention in procoptions) then
           s:=s+' '+ProcCallOptionStr[proccalloption]+';';
@@ -6521,6 +6540,8 @@ implementation
            s := s+' of object';
          if is_nested_pd(self) then
            s := s+' is nested';
+         if po_far in procoptions then
+           s := s+';far';
          GetTypeName := s+';'+ProcCallOptionStr[proccalloption]+'>';
       end;
 

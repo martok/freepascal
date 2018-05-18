@@ -50,6 +50,7 @@ Type
     ParaLibraryPath,
     ParaFrameworkPath,
     parapackagepath : TSearchPathList;
+    paranamespaces : TCmdStrList;
     ParaAlignment   : TAlignmentInfo;
     parapackages : tfphashobjectlist;
     paratarget        : tsystem;
@@ -1591,6 +1592,13 @@ begin
                      else
                        IllegalPara(opt);
                    end;
+                 'N' :
+                   begin
+                     if more<>'' then
+                       paranamespaces.insert(more)
+                     else
+                       illegalpara(opt);
+                   end;
                  'o' :
                    begin
                      if ispara then
@@ -1697,6 +1705,10 @@ begin
                            exclude(init_settings.globalswitches,cs_use_lineinfo)
                          else
                            include(init_settings.globalswitches,cs_use_lineinfo);
+                       end;
+                     'm' :
+                       begin
+                         paratargetdbg:=dbg_codeview;
                        end;
                      'o' :
                        begin
@@ -2384,7 +2396,15 @@ begin
                           begin
                             s:=upper(copy(more,j+1,length(more)-j));
                             if not(SetControllerType(s,init_settings.controllertype)) then
-                              IllegalPara(opt);
+                              IllegalPara(opt)
+                            else
+                              begin
+                                if init_settings.cputype<>embedded_controllers[init_settings.controllertype].cputype then
+                                begin
+                                  Message(scan_n_changecputype);
+                                  init_settings.cputype:=embedded_controllers[init_settings.controllertype].cputype;
+                                end;
+                              end;
                             break;
                           end
                         else
@@ -3193,6 +3213,14 @@ begin
     end;
 {$endif i8086}
 
+  if (cs_debuginfo in init_settings.moduleswitches) and
+     (target_info.system in [system_i8086_msdos,system_i8086_win16,system_i8086_embedded]) and
+     not (cs_link_extern in init_settings.globalswitches) then
+    begin
+      Message(option_debug_info_requires_external_linker);
+      include(init_settings.globalswitches,cs_link_extern);
+    end;
+
   if (paratargetdbg in [dbg_dwarf2,dbg_dwarf3]) and
      not(target_info.system in (systems_darwin+[system_i8086_msdos,system_i8086_embedded])) then
     begin
@@ -3257,6 +3285,7 @@ begin
   ParaFrameworkPath:=TSearchPathList.Create;
   parapackagepath:=TSearchPathList.Create;
   parapackages:=TFPHashObjectList.Create;
+  paranamespaces:=TCmdStrList.Create;
   FillChar(ParaAlignment,sizeof(ParaAlignment),0);
   MacVersionSet:=false;
   paratarget:=system_none;
@@ -3277,6 +3306,7 @@ begin
   ParaFrameworkPath.Free;
   parapackagepath.Free;
   ParaPackages.Free;
+  paranamespaces.free;
 end;
 
 
@@ -3352,6 +3382,8 @@ procedure read_arguments(cmd:TCmdStr);
       abi : tabi;
       fputype : tfputype;
       cputype : tcputype;
+      controller: tcontrollertype;
+      s: string;
     begin
       for cputype:=low(tcputype) to high(tcputype) do
         undef_system_macro('CPU'+Cputypestr[cputype]);
@@ -3361,10 +3393,27 @@ procedure read_arguments(cmd:TCmdStr);
         undef_system_macro('FPU'+fputypestr[fputype]);
       def_system_macro('FPU'+fputypestr[init_settings.fputype]);
 
+{$PUSH}
+{$WARN 6018 OFF} { Unreachable code due to compile time evaluation }
+      if ControllerSupport then
+        begin
+          for controller:=low(tcontrollertype) to high(tcontrollertype) do
+            begin
+              s:=embedded_controllers[controller].controllertypestr;
+              if s<>'' then
+                undef_system_macro('FPC_MCU_'+s);
+            end;
+          s:=embedded_controllers[init_settings.controllertype].controllertypestr;
+          if s<>'' then
+            def_system_macro('FPC_MCU_'+s);
+        end;
+{$POP}
+
       { define abi }
       for abi:=low(tabi) to high(tabi) do
         undef_system_macro('FPC_ABI_'+abiinfo[abi].name);
       def_system_macro('FPC_ABI_'+abiinfo[target_info.abi].name);
+
 
       { Define FPC_ABI_EABI in addition to FPC_ABI_EABIHF on EABI VFP hardfloat
         systems since most code needs to behave the same on both}
@@ -3592,6 +3641,10 @@ var
   i : tfeature;
   j : longint;
   abi : tabi;
+  tmplist : TCmdStrList;
+  cmditem,
+  tmpcmditem : TCmdStrListItem;
+  cmdstr : TCmdStr;
 {$if defined(cpucapabilities)}
   cpuflag : tcpuflags;
   hs : string;
@@ -3799,6 +3852,35 @@ begin
   for j:=0 to option.parapackages.count-1 do
     add_package(option.parapackages.NameOfIndex(j),true,true);
 
+  { add default namespaces }
+  tmplist:=TCmdStrList.Create;
+  cmditem:=TCmdStrListItem(option.paranamespaces.First);
+  while assigned(cmditem) do
+    begin
+      { use a temporary list cause if ";" are involved we need to reverse the
+        order due to how TCmdStrList behaves }
+      cmdstr:=cmditem.str;
+      repeat
+        j:=Pos(';',cmdstr);
+        if j>0 then
+          begin
+            tmplist.insert(copy(cmdstr,1,j-1));
+            delete(cmdstr,1,j);
+          end
+        else
+          tmplist.insert(cmdstr);
+      until j=0;
+      tmpcmditem:=TCmdStrListItem(tmplist.First);
+      while assigned(tmpcmditem) do
+        begin
+          namespacelist.insert(tmpcmditem.Str);
+          tmpcmditem:=TCmdStrListItem(tmpcmditem.Next);
+        end;
+      tmplist.clear;
+      cmditem:=TCmdStrListItem(cmditem.Next);
+    end;
+  tmplist.Free;
+
   { add unit environment and exepath to the unit search path }
   if inputfilepath<>'' then
    Unitsearchpath.AddPath(inputfilepath,true);
@@ -3875,6 +3957,14 @@ begin
           option.paratargetdbg:=dbg_none;
           exclude(init_settings.moduleswitches,cs_debuginfo);
         end;
+      { Some assemblers, like clang, do not support
+        stabs debugging format, switch to dwardé in that case }
+      if (af_no_stabs in asminfos[option.paratargetasm]^.flags) and
+         (option.paratargetdbg=dbg_stabs) then
+        begin
+          option.paratargetdbg:=dbg_dwarf2;
+        end;
+
     end;
   {TOptionheck a second time as we might have changed assembler just above }
   option.checkoptionscompatibility;

@@ -1,4 +1,4 @@
-{
+﻿{
     Copyright (c) 1998-2002 by Florian Klaempfl and Peter Vreman
 
     Contains the abstract assembler implementation for the i386
@@ -52,6 +52,7 @@ interface
       OT_BITS64    = $00000008;  { x86_64 and FPU }
       OT_BITS128   = $10000000;  { 16 byte SSE }
       OT_BITS256   = $20000000;  { 32 byte AVX }
+      OT_BITS512   = $40000000;  { 64 byte AVX512 }
       OT_BITS80    = $00000010;  { FPU only  }
       OT_FAR       = $00000020;  { this means 16:16 or 16:32, like in CALL/JMP }
       OT_NEAR      = $00000040;
@@ -198,7 +199,7 @@ interface
 {$elseif defined(i8086)}
       instabentries = {$i i8086nop.inc}
 {$endif}
-      maxinfolen    = 8;
+      maxinfolen    = 9;
 
     type
       { What an instruction can change. Needed for optimizer and spilling code.
@@ -612,7 +613,8 @@ implementation
           OT_NEAR,OT_FAR,OT_SHORT,
           OT_NONE,
           OT_BITS128,
-          OT_BITS256
+          OT_BITS256,
+          OT_BITS512
          ),
          (OT_NONE,
           OT_BITS8,OT_BITS16,OT_BITS32,OT_BITS64,OT_BITS8,OT_BITS8,OT_BITS16,OT_BITS8,OT_BITS16,OT_BITS32,
@@ -622,7 +624,8 @@ implementation
           OT_NEAR,OT_FAR,OT_SHORT,
           OT_NONE,
           OT_BITS128,
-          OT_BITS256
+          OT_BITS256,
+          OT_BITS512
          ),
          (OT_NONE,
           OT_BITS8,OT_BITS16,OT_BITS32,OT_BITS64,OT_NONE,OT_NONE,OT_NONE,OT_NONE,OT_NONE,OT_NONE,
@@ -632,7 +635,8 @@ implementation
           OT_NEAR,OT_FAR,OT_SHORT,
           OT_NONE,
           OT_BITS128,
-          OT_BITS256
+          OT_BITS256,
+          OT_BITS512
          )
        );
 
@@ -650,7 +654,8 @@ implementation
           OT_NEAR,OT_FAR,OT_SHORT,
           OT_NONE,
           OT_BITS128,
-          OT_BITS256
+          OT_BITS256,
+          OT_BITS512
          ),
          (OT_NONE,
           OT_BITS8,OT_BITS16,OT_BITS32,OT_BITS64,OT_BITS8,OT_BITS8,OT_BITS16,
@@ -660,7 +665,8 @@ implementation
           OT_NEAR,OT_FAR,OT_SHORT,
           OT_NONE,
           OT_BITS128,
-          OT_BITS256
+          OT_BITS256,
+          OT_BITS512
          ),
          (OT_NONE,
           OT_BITS8,OT_BITS16,OT_BITS32,OT_BITS64,OT_NONE,OT_NONE,OT_NONE,
@@ -670,7 +676,8 @@ implementation
           OT_NEAR,OT_FAR,OT_SHORT,
           OT_NONE,
           OT_BITS128,
-          OT_BITS256
+          OT_BITS256,
+          OT_BITS512
          )
       );
 
@@ -688,7 +695,8 @@ implementation
           OT_NEAR,OT_FAR,OT_SHORT,
           OT_NONE,
           OT_BITS128,
-          OT_BITS256
+          OT_BITS256,
+          OT_BITS512
          ),
          (OT_NONE,
           OT_BITS8,OT_BITS16,OT_BITS32,OT_BITS64,OT_BITS8,OT_BITS8,OT_BITS16,
@@ -698,7 +706,8 @@ implementation
           OT_NEAR,OT_FAR,OT_SHORT,
           OT_NONE,
           OT_BITS128,
-          OT_BITS256
+          OT_BITS256,
+          OT_BITS512
          ),
          (OT_NONE,
           OT_BITS8,OT_BITS16,OT_BITS32,OT_BITS64,OT_NONE,OT_NONE,OT_NONE,
@@ -708,7 +717,8 @@ implementation
           OT_NEAR,OT_FAR,OT_SHORT,
           OT_NONE,
           OT_BITS128,
-          OT_BITS256
+          OT_BITS256,
+          OT_BITS512
          )
       );
 
@@ -3708,15 +3718,24 @@ implementation
                  (oper[1]^.typ=top_reg) and
                  (oper[0]^.reg=oper[1]^.reg)
                 ) or
-                (((opcode=A_MOVSS) or (opcode=A_MOVSD) or (opcode=A_MOVQ) or
-                  (opcode=A_MOVAPS) or (opcode=A_MOVAPD) or
-                  (opcode=A_VMOVSS) or (opcode=A_VMOVSD) or (opcode=A_VMOVQ) or
-                  (opcode=A_VMOVAPS) or (opcode=A_VMOVAPD)) and
-                 (regtype = R_MMREGISTER) and
-                 (ops=2) and
-                 (oper[0]^.typ=top_reg) and
-                 (oper[1]^.typ=top_reg) and
-                 (oper[0]^.reg=oper[1]^.reg)
+                ({ checking the opcodes is a long "or" chain, so check first the registers which is more selective }
+                 ((regtype = R_MMREGISTER) and
+                  (ops=2) and
+                  (oper[0]^.typ=top_reg) and
+                  (oper[1]^.typ=top_reg) and
+                  (oper[0]^.reg=oper[1]^.reg)) and
+                  (
+                   (opcode=A_MOVSS) or (opcode=A_MOVSD) or
+                   (opcode=A_MOVQ) or (opcode=A_MOVD) or
+                   (opcode=A_MOVAPS) or (opcode=A_MOVAPD) or
+                   (opcode=A_MOVUPS) or (opcode=A_MOVUPD) or
+                   (opcode=A_MOVDQA) or (opcode=A_MOVDQU) or
+                   (opcode=A_VMOVSS) or (opcode=A_VMOVSD) or
+                   (opcode=A_VMOVQ) or (opcode=A_VMOVD) or
+                   (opcode=A_VMOVAPS) or (opcode=A_VMOVAPD) or
+                   (opcode=A_VMOVUPS) or (opcode=A_VMOVUPD) or
+                   (opcode=A_VMOVDQA) or (opcode=A_VMOVDQU)
+                  )
                 );
       end;
 

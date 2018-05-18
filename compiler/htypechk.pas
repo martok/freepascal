@@ -99,10 +99,13 @@ interface
       tregableinfoflag = (
          // can be put in a register if it's the address of a var/out/const parameter
          ra_addr_regable,
-         // orthogonal to above flag: the address of the node is taken and may
-         // possibly escape the block in which this node is declared (e.g. a
-         // local variable is passed as var parameter to another procedure)
-         ra_addr_taken);
+         { orthogonal to above flag: the address of the node is taken and may
+           possibly escape the block in which this node is declared (e.g. a
+           local variable is passed as var parameter to another procedure)
+         }
+         ra_addr_taken,
+         { variable is accessed in a different scope }
+         ra_different_scope);
       tregableinfoflags = set of tregableinfoflag;
 
     const
@@ -494,6 +497,13 @@ implementation
                     (treetyp in identity_operators) then
                   if is_dynamic_array(rd) or
                       (rt=niln) then
+                    begin
+                      allowed:=false;
+                      exit;
+                    end;
+
+                 { <dyn. array> + <dyn. array> is handled by the compiler }
+                 if (treetyp=addn) and (is_dynamic_array(ld) or is_dynamic_array(rd)) then
                     begin
                       allowed:=false;
                       exit;

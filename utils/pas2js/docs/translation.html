@@ -38,6 +38,7 @@
     <a href="#variables">Translating variables</a><br>
     <a href="#string">Translating string</a><br>
     <a href="#resourcestrings">Translating resourcestrings</a><br>
+    <a href="#currency">Translating currency</a><br>
     <a href="#types">Translating types</a><br>
     <a href="#pointer">Translating pointer</a><br>
     <a href="#record">Translating record</a><br>
@@ -121,21 +122,27 @@ Put + after a boolean switch option to enable it, - to disable it
   @&lt;x&gt;    : Read compiler options from file &lt;x&gt; in addition to the default pas2js.cfg
   -B      : Rebuild all
   -d&lt;x&gt;   : Defines the symbol &lt;x&gt;. Optional: -d&lt;x&gt;:=&lt;value&gt;
-  -i&lt;x&gt;   : Write information and halt. &lt;x&gt; is a combination of the following letters:
-    D     : Write compiler date
-    SO    : Write compiler OS
-    SP    : Write compiler host processor
-    TO    : Write target platform
-    TP    : Write target processor
-    V     : Write short compiler version
-    W     : Write full compiler version
+  -i&lt;x&gt;   : Write information and halt. &lt;x&gt; is a combination of the following:
+    -iD   : Write compiler date
+    -iSO  : Write compiler OS
+    -iSP  : Write compiler host processor
+    -iTO  : Write target platform
+    -iTP  : Write target processor
+    -iV   : Write short compiler version
+    -iW   : Write full compiler version
+    -ic   : Write list of supported JS processors usable by -P&lt;x&gt;
+    -io   : Write list of supported optimizations usable by -Oo&lt;x&gt;
+    -it   : Write list of supported targets usable by -T&lt;x&gt;
   -C&lt;x&gt;   : Code generation options. &lt;x&gt; is a combination of the following letters:
     o     : Overflow checking
     r     : Range checking
     R     : Object checks. Verify method calls and object type casts.
   -F...   Set file names and paths:
-   -Fe&lt;x&gt; : Redirect output to &lt;x&gt;
+   -Fe&lt;x&gt; : Redirect output to file &lt;x&gt;. UTF-8 encoded.
+   -FE&lt;x&gt; : Set main output path to &lt;x&gt;
    -Fi&lt;x&gt; : Add &lt;x&gt; to include paths
+   -FN&lt;x&gt; : add &lt;x&gt; to namespaces. Namespaces with trailing - are removed.
+                  Delphi calls this flag "unit scope names".
    -Fu&lt;x&gt; : Add &lt;x&gt; to unit paths
    -FU&lt;x&gt; : Set unit output path to &lt;x&gt;
   -I&lt;x&gt;   : Add &lt;x&gt; to include paths, same as -Fi
@@ -145,6 +152,7 @@ Put + after a boolean switch option to enable it, - to disable it
      -Jeconsole : Console codepage. Default.
      -Jesystem  : System codepage. On non Windows console and system are the same.
      -Jeutf-8   : Unicode UTF-8. Default when using -Fe.
+     -JeJSON    : Output compiler messages as JSON. Logo etc are outputted as-is.
    -Ji&lt;x&gt; : Insert JS file &lt;x&gt; into main JS file. E.g. -Jirtl.js. Can be given multiple times.
    -Jl    : lower case identifiers
    -Jm    : generate source maps
@@ -155,12 +163,12 @@ Put + after a boolean switch option to enable it, - to disable it
      -Jm- : disable generating source maps
    -Jo&lt;x&gt; : Enable or disable extra option. The x is case insensitive:
      -JoSearchLikeFPC : search source files like FPC, default: search case insensitive.
+     -JoUseStrict : add "use strict" to modules, default.
    -Ju&lt;x&gt; : Add &lt;x&gt; to foreign unit paths. Foreign units are not compiled.
   -l      : Write logo
   -MDelphi: Delphi 7 compatibility mode
   -MObjFPC: FPC's Object Pascal compatibility mode (default)
-  -NS&lt;x&gt;  : add &lt;x&gt; to namespaces. Namespaces with trailing - are removed.
-                  Delphi calls this flag "unit scope names".
+  -NS&lt;x&gt;  : obsolete: add &lt;x&gt; to namespaces. Same as -FN&lt;x&gt;
   -n      : Do not read the default config files
   -o&lt;x&gt;   : Change main JavaScript file to &lt;x&gt;, "." means stdout
   -O&lt;x&gt;   : Optimizations:
@@ -179,25 +187,30 @@ Put + after a boolean switch option to enable it, - to disable it
     c     : Support operators like C (*=,+=,/= and -=)
     d     : Same as -Mdelphi
     2     : Same as -Mobjfpc (default)
+  -SI&lt;x&gt;   : Set interface style to &lt;x&gt;
+    -SIcom   : COM compatible interface (default)
+    -SIcorba : CORBA compatible interface
   -T&lt;x&gt;   : Set target platform, case insensitive.
     -Tbrowser : default
     -Tnodejs  : add pas.run(), includes -Jc
   -u&lt;x&gt;   : Undefines the symbol &lt;x&gt;
   -v&lt;x&gt;   : Be verbose. &lt;x&gt; is a combination of the following letters:
-    e     : show errors (default)
-    w     : show warnings
-    n     : show notes
-    h     : show hints
-    i     : show info
-    l     : show line numbers
-    a     : show everything
-    0     : show nothing (except errors)
-    b     : show file names with full path
-    c     : show conditionals
-    t     : show tried/used files
-    d     : show debug notes and info, enables -vni
-    q     : show message numbers
-    x     : show used tools
+    e     : Show errors (default)
+    w     : Show warnings
+    n     : Show notes
+    h     : Show hints
+    i     : Show info
+    l     : Show line numbers
+    a     : Show everything
+    0     : Show nothing (except errors)
+    b     : Show file names with full path
+    c     : Show conditionals
+    t     : Show tried/used files
+    d     : Show debug notes and info, enables -vni
+    q     : Show message numbers
+    x     : Show used tools
+    v     : Write pas2jsdebug.log with lots of debugging info
+    z     : Write messages to stderr, -o. still uses stdout.
   -vm&lt;x&gt;,&lt;y&gt;: Do not show messages numbered &lt;x&gt; and &lt;y&gt;.
   -?      : Show this help
   -h      : Show this help
@@ -486,9 +499,19 @@ function(){
     <li>Type casting an <i>integer</i> to <i>boolean</i>, gives <i>false</i> for <i>0</i> and <i>true</i> otherwise.</li>
     <li>A <b>char</b> is translated to a JS string, because JS lacks a native char type.</li>
     <li>A <b>char</b> is a single JS char code. An UTF-16 codepoint can contain one or two <b>char</b>.</li>
-    <li>Integers overflows at runtime differ from Delphi/FPC, due to the double format.
-    For example adding <i>var i: byte = 200; ... i:=i+100;</i> will result in
-    <i>i=300</i> instead of <i>i=44</i> as in Delphi/FPC.</li>
+    <li><b>Integers overflows</b> at runtime differ from Delphi/FPC, due to the double format.
+      For example adding <i>var i: byte = 200; ... i:=i+100;</i> will result in
+      <i>i=300</i> instead of <i>i=44</i> as in Delphi/FPC.
+      When range checking <i>{$R+}</i> is enabled <i>i=300</i> will raise an ERangeError.</li>
+    <li><b>type cast integer to integer</b>, e.g. <i>byte(aLongInt)</i>
+      <ul>
+        <li>with range checking enabled: error if outside range</li>
+        <li>without range checking: emulates the FPC/Delphi behaviour:
+          e.g. <i>byte(value)</i> translates to <i>value &amp; 0xff</i>,
+          <i>shortint(value)</i> translates to <i>value &amp; 0xff &lt;&lt;24 &gt;&gt; 24.</i></li>
+      </ul>
+    </li>
+    <li>The <b>mod-operator</b> works 32-bit signed in JS.</li>
     </ul>
     </div>
 
@@ -546,6 +569,26 @@ End.
     </div>
 
     <div class="section">
+    <h2 id="currency">Translating currency</h2>
+    <i>Currency</i> in Delphi/FPC is an int64 with a factor of 10000. This is
+    translated to a double with factor 10000 and truncated.
+    <ul>
+      <li><i>CurA := 1.12345</i> -> <i>CurA = 11234</i></li>
+      <li><i>CurA + CurB</i> -> <i>CurA + CurB</i></li>
+      <li><i>CurA * CurB</i> -> <i>CurA * CurB/10000</i></li>
+      <li><i>CurA / CurB</i> -> <i>Math.floor(CurA/CurB * 10000)</i></li>
+      <li><i>CurA ^^ CurB</i> -> <i>Math.floor(Math.pow(CurA/10000,CurB/10000) * 10000)</i></li>
+      <li><i>Currency + Double</i> -> <i>Currency + (Double*10000)</i></li>
+      <li><i>Double := Currency</i> -> <i>Double = Currency/10000</i></li>
+      <li><i>Currency := Double</i> -> <i>Currency = Math.floor(Double*10000)</i></li>
+      <li><i>JSValue := Currency</i> -> <i>JSValue = Currency/10000</i></li>
+      <li>Keep in mind that a double has only 52 bits for the number, so calculating
+      values greater than 450,359,962,737 might give a different result than in Delphi/FPC.
+      See SysUtils.MinCurrency/MaxCurrency</li>
+    </ul>
+    </div>
+
+    <div class="section">
     <h2 id="types">Translating Types</h2>
     JavaScript type design has no declarative form, except for object types
     (so-called prototypes).
@@ -558,10 +601,12 @@ End.
 
     <div class="section">
     <h2 id="pointer">Translating pointer</h2>
-    A <i>pointer</i> is translated to a reference. It can be assigned a class,
-    a class reference, an array, a procedure var, a method var, a @proc address
-    or a @method address. There is no pointer arithmetic and no typed
-    pointers. You can find out its type using the functions <i>isArray</i>,
+    A <i>pointer</i> is translated to a JS reference. It can be assigned a class,
+    a class instance, a class-of, an array, a procedure var, a method var, a @proc address,
+    a @method address, or a pointer of record.
+    There is no pointer arithmetic, i.e. no p+1, and no typed pointers,
+    except for pointer of record.
+    You can find out its type using the functions <i>isArray</i>,
     <i>isClass</i>, <i>isClassRef</i>, <i>isCallback</i>, etc of unit <i>JS</i>.
     </div>
 
@@ -629,9 +674,20 @@ function(){
     <ul>
       <li>The record variable creates a JavaScript object.</li>
       <li>Variant records are not supported.</li>
-      <li>Supported: Assign, pass as argument, equal, not equal, array of record</li>
-      <li>Not yet implemented: Constants, pointer of record, advanced records, operators.</li>
+      <li>Supported: Assign, pass as argument, equal, not equal,
+      array of record, pointer of record, const, default().</li>
+      <li>Not yet implemented: advanced records, operators.</li>
       <li>When assigning a record it is cloned. This is compatible with Delphi and FPC.</li>
+      <li>Since record types are JS objects it is possible to typecast a record type
+      to the JS Object, e.g. TJSObject(TPoint)</li>
+      <li>A pointer of record is simply a reference.
+        <ul>
+          <li><i>p:=@r</i> translates to <i>p=r</i></li>
+          <li><i>p^.x</i> becomes <i>p.x</i>.</li>
+          <li><i>New(PointerOfRecord)</i> creates a new record</li>
+          <li><i>Dispose(PointerOfRecord)</i> Sets the variable to null if possible.</li>
+        </ul>
+      </li>
     </ul>
     </div>
 
@@ -1474,12 +1530,15 @@ function(){
     <li>Supported: constructor, destructor, private, protected, public,
       strict private, strict protected, class vars, class methods, external methods,
       virtual, override, abstract, call inherited, assigned(), type cast,
-      overloads, reintroduce, sealed class</li>
+      overloads, reintroduce, sealed class, nested types.</li>
     <li>Not supported: class constructor/destructor</li>
     <li>Property:
       <ul>
       <li>References are replaced by getter/setter.</li>
-      <li>Supported: argument lists, default property, class property, stored modifier, index modifier.</li>
+      <li>Supported: argument lists, default property, class property,
+      stored modifier, index modifier.</li>
+      <li>Not supported: getter/setter to an array element,
+      e.g. <i>property A: char read FArray[0];</i> </li>
       <li>Class property getter/setter are not static as in Delphi.</li>
       <li>The <i>Index</i> modifier supports any constant, e.g. a string, while
       Delphi only allows an ordinal (longint). -2147483648 is not a special
@@ -1597,9 +1656,109 @@ function(){
 
     <div class="section">
     <h2 id="classinterfaces">Translating class interfaces</h2>
-    Class interfaces are not yet implemented. To make porting code easier there
-    is a <i>{$modeswitch ignoreinterfaces}</i>, that ignores interface declarations
-    and the class interface list.
+    JavaScript has nothing like it, so they are emulated.<br>
+    An interfacetype is a JS-object with some hidden properties, containing
+    the GUID ($guid) and an array with the method names ($names). Here is how
+    IUnknown looks like in JS:<br>
+<pre>
+{
+  $module: [object Object],
+  $name: "IUnknown",
+  $fullname: "System.IUnknown",
+  $guid: "{00000000-0000-0000-C000-000000000046}",
+  $names: ["QueryInterface","_AddRef","_Release"],
+  $rtti: [object Object],
+  $kind: "com",
+}
+</pre>
+    A class implementing interfaces has a variable <i>$intfmaps</i>, which has
+    for each implemented GUID a map or delegator function. A map
+    is a JS instance of the interfacetype plus a for each method name a
+    function to call the class method. Here is an example map of <i>IUnknown</i> of
+    <i>TInterfacedObject</i>:<br>
+<pre>
+{
+  QueryInterface: function (){ return fn.apply(this.$o,arguments); },
+  _AddRef: function (){ return fn.apply(this.$o,arguments); },
+  _Release: function (){ return fn.apply(this.$o,arguments); },
+  ...
+}
+</pre>
+    When an interface is created for an object (here: a Pascal class instance),
+    for example by using the <i>as</i>-operator "<i>ObjVar as IUnknown</i>",
+    a JS object is created, which
+    is an instance of the map object with its <i>$o</i> set to the <i>ObjVar</i>.<br>
+    <br>
+    Supported:
+    <ul>
+    <li>methods, properties, default property</li>
+    <li><i>{$interfaces com|corba|default}</i><br>
+      <ul>
+        <li>COM is default, default ancestor is IUnknown (mode delphi: IInterface),
+          managed type, i.e. automatically reference counted via _AddRef, _Release, the checks for support call QueryInterface</li>
+        <li>CORBA: lightweight, no automatic reference counting,
+          no default ancestor, fast support checks.</li>
+      </ul>
+      </li>
+    <li>inheriting</li>
+    <li>An interface without a GUID gets one autogenerated from its name and method names.</li>
+    <li>Contrary to Delphi/FPC you can assign an interface type or var to
+    the type TGuidString.</li>
+    <li>a class implementing an interface must not be external</li>
+    <li>a ClassType "supports" an interface, if it itself or one of its
+      ancestors implements the interface.
+      It does not automatically support an ancestor of the interface.</li>
+    <li>method resolution, procedure IUnknown._AddRef = IncRef;</li>
+    <li>delegation: property Name: interface|class read Field|Getter implements AnInterface;</li>
+    <li>is-operator:</li>
+      <ul>
+        <li>IntfVar is IntfType - types must be releated</li>
+        <li>IntfVar is ClassType - types can be unrelated, class must not be external</li>
+        <li>ObjVar is IntfType - can be unrelated</li>
+      </ul>
+    <li>as-operator</li>
+      <ul>
+        <li>IntfVar as IntfType - types must be releated</li>
+        <li>IntfVar as ClassType - types can be unrelated, nil returns nil,
+          invalid raises EInvalidCast</li>
+        <li>ObjVar as IntfType - can be unrelated, nil if not found, COM: uses _AddRef</li>
+      </ul>
+    <li>typecast:</li>
+      <ul>
+        <li>IntfType(IntfVar) - must be related</li>
+        <li>ClassType(IntfVar) - can be unrelated, nil if invalid</li>
+        <li>IntfType(ObjVar) - nil if not found,
+          COM: if ObjVar has delegate uses _AddRef</li>
+        <li>TJSObject(IntfTypeOrVar)</li>
+        <li>jsvalue(intfvar)</li>
+      </ul>
+    <li>Assign operator:</li>
+      <ul>
+        <li>IntfVar:=nil;</li>
+        <li>IntfVar:=IntfVar2; - IntfVar2 must be same type or a descendant</li>
+        <li>IntfVar:=ObjVar; - nil if unsupported</li>
+        <li>jsvalue:=IntfVar;</li>
+        <li>TGUIDVar:=IntfType;</li>
+        <li>TGUIDVar:=IntfVar;</li>
+        <li>TGUIDVar:=stringconstant;</li>
+        <li>TGUIDStringVar:=IntfVar;</li>
+        <li>StringVar:=GuidVar;</li>
+      </ul>
+    <li>Equal/Inequal operator:</li>
+      <ul>
+        <li>IntfVar=nil;</li>
+        <li>IntfVar=IntfVar2; - must be related</li>
+        <li>jsvalue=IntfVar;</li>
+        <li>TGUIDVar=IntfType;</li>
+        <li>TGUIDVar=IntfVar;</li>
+        <li>TGUIDVar=string;</li>
+        <li>TGUIDStringVar=IntfVar;</li>
+      </ul>
+    <li>Passing an COMIntfVar to an untyped parameter does not trigger _AddRef, _Release.</li>
+    <li>Assigned(IntfVar)</li>
+    <li>RTTI, typeinfo(IntfType), typeinfo(IntfVar)</li>
+    </ul>
+    Not yet supported: array of intferfacetype, interface as record member.
     </div>
 
     <div class="section">
@@ -1702,6 +1861,7 @@ function(){
     byte, ..., longword, enums, custom ranges are translated to a for loop.</li>
     <li>set types are translated to a for loop, while const sets and set variables are enumerated via a for(...in...) loop.</li>
     <li>string and array variables are enumerated via for loops.</li>
+    <li>for aString in ArrayOfString do ...</li>
     </ul>
     The class GetEnumerator function is translated like this:
     <table class="sample">
@@ -1757,7 +1917,9 @@ function(){
     </table>
     Notes:
     <ul>
-    <li>Not supported: IEnumerator, operator Enumerator, member modifier enumerator (i.e. custom Current and MoveNext)</li>
+    <li>Not supported: operator Enumerator, member modifier enumerator (i.e. custom Current and MoveNext)</li>
+    <li><i>for key in jsvalue do</i> translates to <i>for (key in jsvalue){}</i></li>
+    <li><i>for key in externalclass do</i> translates to <i>for (key in externalclass){}</i></li>
     </ul>
     </div>
 
@@ -2242,9 +2404,11 @@ function(){
 type
   TWrapper = class
   private
-    // let's assume this object has a $Handle and an $id
+    // let's assume this object has the properties "$Handle", "$id", and "0"
   public
     Id: NativeInt; external name '$Id';
+    x: NativeInt; external name '[0]';
+    y: NativeInt; external name '["A B"]';
     function GetState(typ: longint): NativeInt; external name '$Handle.GetState';
     procedure DoIt;
   end;
@@ -2256,7 +2420,9 @@ var
   W: TWrapper;
 Begin
   W.Id := 2;
-  W.GetState(3);
+  W.x := 3;
+  W.y := 4;
+  W.GetState(5);
 End.
 </pre>
           </td>
@@ -2273,7 +2439,9 @@ function(){
   this.W = null;
   $mod.$main = function(){
     $mod.W.$Id = 2;
-    $mod.W.$Handle.GetState(3);
+    $mod.W[0] = 3;
+    $mod.W["A B"] = 4;
+    $mod.W.$Handle.GetState(5);
   };
 },
 []);
@@ -2282,6 +2450,9 @@ function(){
         </tr>
       </tbody>
     </table>
+    <ul>
+      <li>Non identifiers like "0" or "A B" must be enclosed in brackets.</li>
+    </ul>
     </div>
 
     <div class="section">
@@ -2358,6 +2529,8 @@ End.
       For example you can call the class function <i>TJSString.fromCharCode()</i>, but you cannot
       call <i>aJSString.fromCharCode()</i>.</li>
       <li>An external class can descend from another external class.</li>
+      <li>Since class types are JS objects it is possible to typecast a class type
+      to the JS Object, e.g. TJSObject(TObject)</li>
     </ul>
     </div>
 
@@ -2602,7 +2775,7 @@ End.
     <li>{$EndIf}: ends an $IfDef block</li>
     <li>{$mode delphi} or {$mode objfpc}: Same as -Mdelphi or -Mobjfpc, but only for this unit. You can use units of both modes in a program. If present must be at the top of the unit, or after the module name.</li>
     <li>{$modeswitch externalclass}: allow declaring external classes</li>
-    <li>{$macro on|off} enables macro replacements. Only macros with a custom value are replaced. Macros are never replaced inside directives.</li>
+    <li>{$macro on|off} enables macro replacements. Only macros with a value are replaced. Macros are never replaced inside directives.</li>
     <li>{$I filename} or {$include filename} - insert include file</li>
     <li>{$Warnings on|off}</li>
     <li>{$Notes on|off}</li>
@@ -2614,7 +2787,16 @@ End.
     <li>{$Message hint-text}</li>
     <li>{$Message hint|note|warn|error|fatal text}</li>
     <li>{$M+}, {$TypeInfo on}: switches default visibility for class members from public to published</li>
-    <li>{$ScopedEnums on|off} disabled/default: propagate enums to global scope, enable: needs fqn e.g. TEnumType.EnumValue.</li>
+    <li>{$ScopedEnums on|off} disabled(default): propagate enums to global scope, enable: needs fqn e.g. TEnumType.EnumValue.</li>
+    <li>{$R+}, {$RangeChecks on}: compile time range check hints become errors
+    and add runtime range checks for assignments.</li>
+    <li>{$ObjectChecks on|off}:
+      <ul>
+        <li>Verify method calls, i.e. check at runtime in every method if <i>Self</i> is a descendant class.</li>
+        <li>Check type casts, e.g. <i>TBird(AnObject)</i> becomes <i>AnObject as TBird</i></li>
+      </ul>
+    </li>
+    <li>{$J-}, {$WriteableConst off}: Typed const become readonly. For example <i>const i:byte=3; ... i:=4</i> creates a compile time error.</li>
     </ul>
     Defines:
     <ul>
@@ -2666,12 +2848,18 @@ End.
     <ul>
     <li><b>break</b>, <b>continue</b>, <b>exit</b>, <b>exit()</b></li>
     <li><b>chr</b>, <b>ord</b></li>
-    <li>alias type, but not type alias type</li>
+    <li>alias type and type alias type</li>
     <li>inc()/dec() to += -=</li>
     <li>Converts "a div b" to "Math.floor(a / b)"</li>
     <li>and, or, xor, not: logical and bitwise</li>
     <li>Name conflicts with JS identifiers are automatically fixed by changing case.
     For example a Pascal function "<i>apply"</i> is renamed to "<i>Apply</i>".</li>
+    <li>uses unitname in 'filename'.
+    In <i>$mode delphi</i> the in-filenames are only allowed in the program
+    and the unitname must fit the filename,
+    e.g. <i>uses unit1 in 'sub/Unit1.pas'</i>.<br>
+    In <i>$mode objfpc</i> units can use in-filenames too and
+    alias are allowed, e.g. <i>uses foo in 'bar.pas'</i>.</li>
     <li>The built-in procedure <b>str</b> works with boolean, integer, float and enumvalue.<br>
     Additionally there is <b>str</b> function, that takes an arbitrary number of
     arguments and returns a concatenated string. It supports string as parameter too.
@@ -2695,19 +2883,13 @@ End.
     <li>Futures</li>
     <li>Helpers for types, classes, records</li>
     <li>Inline</li>
-    <li>Interfaces</li>
     <li>Library</li>
-    <li>Nested classes</li>
     <li>Objects</li>
     <li>Operator overloading</li>
-    <li>Pointer of record</li>
     <li>Pointer arithmetic</li>
     <li>Resources</li>
     <li>RTTI extended, $RTTI</li>
     <li>Runtime checks: Overflow -Co, $Q</li>
-    <li>Runtime checks: Range -Cr, $R</li>
-    <li>Runtime checks: Typecast -CR</li>
-    <li>Type alias, e.g. type TTranslateString = type string;</li>
     <li>Variant records</li>
     <li>Variants</li>
     </ul>

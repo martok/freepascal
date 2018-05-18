@@ -188,7 +188,7 @@ implementation
            assigned(hp.globalmacrosymtable) then
           macrosymtablestack.push(hp.globalmacrosymtable);
         { insert unitsym }
-        unitsym:=cunitsym.create(s,hp);
+        unitsym:=cunitsym.create(hp.modulename^,hp,true);
         inc(unitsym.refs);
         tabstractunitsymtable(current_module.localsymtable).insertunit(unitsym);
         if addasused then
@@ -430,7 +430,7 @@ implementation
       var
          s,sorg  : ansistring;
          fn      : string;
-         pu      : tused_unit;
+         pu,pu2  : tused_unit;
          hp2     : tmodule;
          unitsym : tunitsym;
          filepos : tfileposinfo;
@@ -487,8 +487,7 @@ implementation
                 can not use the modulename because that can be different
                 when -Un is used }
               current_tokenpos:=filepos;
-              unitsym:=cunitsym.create(sorg,nil);
-              tabstractunitsymtable(current_module.localsymtable).insertunit(unitsym);
+              unitsym:=cunitsym.create(sorg,nil,false);
               { the current module uses the unit hp2 }
               current_module.addusedunit(hp2,true,unitsym);
             end
@@ -522,8 +521,40 @@ implementation
                pu.checksum:=pu.u.crc;
                pu.interface_checksum:=pu.u.interface_crc;
                pu.indirect_checksum:=pu.u.indirect_crc;
-               { connect unitsym to the module }
-               pu.unitsym.module:=pu.u;
+               if tppumodule(pu.u).nsprefix<>'' then
+                 begin
+                   { use the name as declared in the uses section for -Un }
+                   sorg:=tppumodule(pu.u).nsprefix+'.'+pu.unitsym.realname;
+                   s:=upper(sorg);
+                   { check whether the module was already loaded }
+                   hp2:=nil;
+                   pu2:=tused_unit(current_module.used_units.first);
+                   while assigned(pu2) and (pu2<>pu) do
+                    begin
+                      if (pu2.u.modulename^=s) then
+                       begin
+                         hp2:=pu.u;
+                         break;
+                       end;
+                      pu2:=tused_unit(pu2.next);
+                    end;
+                   if assigned(hp2) then
+                     begin
+                       MessagePos1(pu.unitsym.fileinfo,sym_e_duplicate_id,s);
+                       pu:=tused_unit(pu.next);
+                       continue;
+                     end;
+                   { update unitsym now that we have access to the full name }
+                   pu.unitsym.free;
+                   pu.unitsym:=cunitsym.create(sorg,pu.u,true);
+                 end
+               else
+                 begin
+                   { connect unitsym to the module }
+                   pu.unitsym.module:=pu.u;
+                   pu.unitsym.register_sym;
+                 end;
+               tabstractunitsymtable(current_module.localsymtable).insertunit(pu.unitsym);
                { add to symtable stack }
                if assigned(preservest) then
                  symtablestack.pushafter(pu.u.globalsymtable,preservest)
@@ -895,7 +926,7 @@ type
 
          { insert unitsym of this unit to prevent other units having
            the same name }
-         tabstractunitsymtable(current_module.localsymtable).insertunit(cunitsym.create(current_module.realmodulename^,current_module));
+         tabstractunitsymtable(current_module.localsymtable).insertunit(cunitsym.create(current_module.realmodulename^,current_module,true));
 
          { load default system unit, it must be loaded before interface is parsed
            else we cannot use e.g. feature switches before the next real token }
@@ -1644,7 +1675,7 @@ type
 
          {Insert the name of the main program into the symbol table.}
          if current_module.realmodulename^<>'' then
-           tabstractunitsymtable(current_module.localsymtable).insertunit(cunitsym.create(current_module.realmodulename^,current_module));
+           tabstractunitsymtable(current_module.localsymtable).insertunit(cunitsym.create(current_module.realmodulename^,current_module,true));
 
          Message1(parser_u_parsing_implementation,current_module.mainsource);
 
@@ -2073,7 +2104,7 @@ type
 
          {Insert the name of the main program into the symbol table.}
          if current_module.realmodulename^<>'' then
-           tabstractunitsymtable(current_module.localsymtable).insertunit(cunitsym.create(current_module.realmodulename^,current_module));
+           tabstractunitsymtable(current_module.localsymtable).insertunit(cunitsym.create(current_module.realmodulename^,current_module,true));
 
          Message1(parser_u_parsing_implementation,current_module.mainsource);
 

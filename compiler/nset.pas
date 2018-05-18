@@ -695,7 +695,7 @@ implementation
           add_label_to_blockid_list(result,labels);
         end;
 
-      function makeifblock(const labtree : pcaselabel; elseblock : tnode): tnode;
+      function makeifblock(elseblock : tnode): tnode;
         var
           i, j: longint;
           check: taddnode;
@@ -723,7 +723,7 @@ implementation
                     newcheck:=@check;
                   labitem:=TLinkedListCaseLabelItem(lablist[j]).casenode;
                   newcheck^:=caddnode.create(equaln,left.getcopy,labitem^._low_str.getcopy);
-                  if (labtree^._low_str.fullcompare(labtree^._high_str)<>0) then
+                  if (labitem^._low_str.fullcompare(labitem^._high_str)<>0) then
                     begin
                       newcheck^.nodetype:=gten;
                       newcheck^:=caddnode.create(
@@ -800,7 +800,7 @@ implementation
 
          if (labels^.label_type = ltConstString) then
            begin
-             if_node:=makeifblock(labels, elseblock);
+             if_node:=makeifblock(elseblock);
 
              if assigned(init_block) then
                firstpass(tnode(init_block));

@@ -48,7 +48,8 @@ type
     property Log: TPas2jsLogger read FLog write FLog;
   end;
 
-  TOnFindModule = function(const aUnitname: String): TPasModule of object;
+  TOnFindModule = function(const AUnitName, InFilename: String; NameExpr,
+      InFileExpr: TPasExpr): TPasModule of object;
   TOnCheckSrcName = procedure(const aElement: TPasElement) of object;
 
   { TPas2jsCompilerResolver }
@@ -57,7 +58,6 @@ type
   private
     FLog: TPas2jsLogger;
     FOnCheckSrcName: TOnCheckSrcName;
-    FOnContinueParsing: TNotifyEvent;
     FOnFindModule: TOnFindModule;
     FP2JParser: TPas2jsPasParser;
   public
@@ -66,10 +66,11 @@ type
       const ASrcPos: TPasSourcePos): TPasElement;
       overload; override;
     function FindModule(const aUnitname: String): TPasModule; override;
-    procedure ContinueParsing; override;
+    function FindUnit(const AName, InFilename: String; NameExpr,
+      InFileExpr: TPasExpr): TPasModule; override;
+    procedure UsedInterfacesFinished(Section: TPasSection); override;
   public
     Owner: TObject;
-    property OnContinueParsing: TNotifyEvent read FOnContinueParsing write FOnContinueParsing;
     property OnFindModule: TOnFindModule read FOnFindModule write FOnFindModule;
     property OnCheckSrcName: TOnCheckSrcName read FOnCheckSrcName write FOnCheckSrcName;
     property Log: TPas2jsLogger read FLog write FLog;
@@ -160,12 +161,20 @@ end;
 
 function TPas2jsCompilerResolver.FindModule(const aUnitname: String): TPasModule;
 begin
-  Result:=OnFindModule(aUnitname);
+  raise EPasResolve.Create('Call TPas2jsCompilerResolver.FindModule(name,expr,...) instead');
+  Result:=nil;
+  if aUnitname='' then ;
 end;
 
-procedure TPas2jsCompilerResolver.ContinueParsing;
+function TPas2jsCompilerResolver.FindUnit(const AName, InFilename: String;
+  NameExpr, InFileExpr: TPasExpr): TPasModule;
 begin
-  OnContinueParsing(Self);
+  Result:=OnFindModule(AName,InFilename,NameExpr,InFileExpr);
+end;
+
+procedure TPas2jsCompilerResolver.UsedInterfacesFinished(Section: TPasSection);
+begin
+  if Section=nil then ;
 end;
 
 end.
