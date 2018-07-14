@@ -490,7 +490,7 @@ var rtl = {
         var intfname = names[i];
         var fnname = map[intfname];
         if (!fnname) fnname = intfname;
-        //console.log('addIntf: intftype='+t.$name+' index='+i+' intfname="'+intfname+'" fnname="'+fnname+'" proc='+typeof(fn));
+        //console.log('addIntf: intftype='+t.$name+' index='+i+' intfname="'+intfname+'" fnname="'+fnname+'" old='+typeof(item[intfname]));
         item[intfname] = jmp(aclass[fnname]);
       }
       t = Object.getPrototypeOf(t);
@@ -507,7 +507,7 @@ var rtl = {
     if (!item) return null;
     // check delegation
     //console.log('getIntfG: obj='+obj.$classname+' guid='+guid+' query='+query+' item='+typeof(item));
-    if (typeof item === 'function') return item.call(obj); // COM: contains _AddRef
+    if (typeof item === 'function') return item.call(obj); // delegate. Note: COM contains _AddRef
     // check cache
     var intf = null;
     if (obj.$interfaces){
@@ -576,7 +576,7 @@ var rtl = {
     ref: function(id,intf){
       // called for temporary interface references needing delayed release
       var old = this[id];
-      //console.log('rtl.intfRefs.ref: id='+id+' old="'+(old?old.$name:'null')+'" intf="'+(intf?intf.$name:'null'));
+      //console.log('rtl.intfRefs.ref: id='+id+' old="'+(old?old.$name:'null')+'" intf="'+(intf?intf.$name:'null')+' $o='+(intf?intf.$o:'null'));
       if (old){
         // called again, e.g. in a loop
         delete this[id];
@@ -588,7 +588,10 @@ var rtl = {
     free: function(){
       //console.log('rtl.intfRefs.free...');
       for (var id in this){
-        if (this.hasOwnProperty(id)) this[id]._Release;
+        if (this.hasOwnProperty(id)){
+          //console.log('rtl.intfRefs.free: id='+id+' '+this[id].$name+' $o='+this[id].$o.$classname);
+          this[id]._Release();
+        }
       }
     }
   },
@@ -745,16 +748,16 @@ var rtl = {
     return true;
   },
 
-  arrayClone: function(type,src,srcpos,end,dst,dstpos){
+  arrayClone: function(type,src,srcpos,endpos,dst,dstpos){
     // type: 0 for references, "refset" for calling refSet(), a function for new type()
     // src must not be null
     // This function does not range check.
     if (rtl.isFunction(type)){
-      for (; srcpos<end; srcpos++) dst[dstpos++] = new type(src[srcpos]); // clone record
-    } else if((typeof(type)==="string") && (type === 'refSet')) {
-      for (; srcpos<end; srcpos++) dst[dstpos++] = rtl.refSet(src[srcpos]); // ref set
+      for (; srcpos<endpos; srcpos++) dst[dstpos++] = new type(src[srcpos]); // clone record
+    } else if(type === 'refSet') {
+      for (; srcpos<endpos; srcpos++) dst[dstpos++] = rtl.refSet(src[srcpos]); // ref set
     }  else {
-      for (; srcpos<end; srcpos++) dst[dstpos++] = src[srcpos]; // reference
+      for (; srcpos<endpos; srcpos++) dst[dstpos++] = src[srcpos]; // reference
     };
   },
 
@@ -762,14 +765,31 @@ var rtl = {
     // type: see rtl.arrayClone
     var a = [];
     var l = 0;
-    for (var i=1; i<arguments.length; i++) l+=arguments[i].length;
+    for (var i=1; i<arguments.length; i++){
+      var src = arguments[i];
+      if (src !== null) l+=src.length;
+    };
     a.length = l;
     l=0;
     for (var i=1; i<arguments.length; i++){
       var src = arguments[i];
-      if (src == null) continue;
+      if (src === null) continue;
       rtl.arrayClone(type,src,0,src.length,a,l);
       l+=src.length;
+    };
+    return a;
+  },
+
+  arrayConcatN: function(){
+    var a = null;
+    for (var i=1; i<arguments.length; i++){
+      var src = arguments[i];
+      if (src === null) continue;
+      if (a===null){
+        a=src; // Note: concat(a) does not clone
+      } else {
+        a=a.concat(src);
+      }
     };
     return a;
   },
@@ -777,7 +797,7 @@ var rtl = {
   arrayCopy: function(type, srcarray, index, count){
     // type: see rtl.arrayClone
     // if count is missing, use srcarray.length
-    if (srcarray == null) return [];
+    if (srcarray === null) return [];
     if (index < 0) index = 0;
     if (count === undefined) count=srcarray.length;
     var end = index+count;

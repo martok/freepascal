@@ -34,15 +34,18 @@ type
 
   TCustomTestCLI_Precompile = class(TCustomTestCLI)
   private
-    FFormat: TPas2JSPrecompileFormat;
+    FPCUFormat: TPas2JSPrecompileFormat;
+    FUnitOutputDir: string;
   protected
+    procedure SetUp; override;
     procedure CheckPrecompile(MainFile, UnitPaths: string;
       SharedParams: TStringList = nil;
       FirstRunParams: TStringList = nil;
       SecondRunParams: TStringList = nil; ExpExitCode: integer = 0);
   public
     constructor Create; override;
-    property Format: TPas2JSPrecompileFormat read FFormat write FFormat;
+    property PCUFormat: TPas2JSPrecompileFormat read FPCUFormat write FPCUFormat;
+    property UnitOutputDir: string read FUnitOutputDir write FUnitOutputDir;
   end;
 
   { TTestCLI_Precompile }
@@ -53,10 +56,12 @@ type
     procedure TestPCU_UTF8BOM;
     procedure TestPCU_ParamNS;
     procedure TestPCU_Overloads;
+    procedure TestPCU_Overloads_MDelphi_ModeObjFPC;
     procedure TestPCU_UnitCycle;
     procedure TestPCU_ClassForward;
     procedure TestPCU_ClassConstructor;
     procedure TestPCU_ClassInterface;
+    procedure TestPCU_Namespace;
   end;
 
 function LinesToList(const Lines: array of string): TStringList;
@@ -73,15 +78,20 @@ end;
 
 { TCustomTestCLI_Precompile }
 
+procedure TCustomTestCLI_Precompile.SetUp;
+begin
+  inherited SetUp;
+  UnitOutputDir:='units';
+end;
+
 procedure TCustomTestCLI_Precompile.CheckPrecompile(MainFile,
   UnitPaths: string; SharedParams: TStringList; FirstRunParams: TStringList;
   SecondRunParams: TStringList; ExpExitCode: integer);
 var
-  UnitOutputDir, JSFilename, OrigSrc, NewSrc, s: String;
+  JSFilename, OrigSrc, NewSrc, s: String;
   JSFile: TCLIFile;
 begin
   try
-    UnitOutputDir:='units';
     AddDir(UnitOutputDir);
     // compile, create  .pcu files
     {$IFDEF VerbosePCUFiler}
@@ -92,8 +102,8 @@ begin
       Params.Assign(SharedParams);
     if FirstRunParams<>nil then
       Params.AddStrings(FirstRunParams);
-    Compile([MainFile,'-Jc','-Fu'+UnitPaths,'-JU'+Format.Ext,'-FU'+UnitOutputDir]);
-    AssertFileExists('units/system.'+Format.Ext);
+    Compile([MainFile,'-Jc','-Fu'+UnitPaths,'-JU'+PCUFormat.Ext,'-FU'+UnitOutputDir]);
+    AssertFileExists(UnitOutputDir+'/system.'+PCUFormat.Ext);
     JSFilename:=UnitOutputDir+PathDelim+ExtractFilenameOnly(MainFile)+'.js';
     AssertFileExists(JSFilename);
     JSFile:=FindFile(JSFilename);
@@ -129,7 +139,7 @@ end;
 constructor TCustomTestCLI_Precompile.Create;
 begin
   inherited Create;
-  FFormat:=PrecompileFormats[0];
+  FPCUFormat:=PrecompileFormats[0];
 end;
 
 { TTestCLI_Precompile }
@@ -209,6 +219,44 @@ begin
     '  DoIt(3.3);',
     'end.']);
   CheckPrecompile('test1.pas','src');
+end;
+
+procedure TTestCLI_Precompile.TestPCU_Overloads_MDelphi_ModeObjFPC;
+var
+  SharedParams: TStringList;
+begin
+  AddUnit('src/system.pp',[
+  'type',
+  '  integer = longint;',
+  '  TDateTime = type double;'],
+  ['']);
+  AddFile('src/unit1.pp',
+    LinesToStr([
+    'unit unit1;',
+    '{$mode objfpc}',
+    'interface',
+    'function DoIt(i: integer): TDateTime;', // no overload needed in ObjFPC
+    'function DoIt(i, j: integer): TDateTime;',
+    'implementation',
+    'function DoIt(i: integer): TDateTime;',
+    'begin',
+    '  Result:=i;',
+    'end;',
+    'function DoIt(i, j: integer): TDateTime;',
+    'begin',
+    '  Result:=i+j;',
+    'end;',
+    'end.']));
+  AddFile('test1.pas',[
+    'uses unit1;',
+    'var d: TDateTime;',
+    'begin',
+    '  d:=DoIt(3);',
+    '  d:=DoIt(4,5);',
+    'end.']);
+  SharedParams:=TStringList.Create;
+  SharedParams.Add('-MDelphi');
+  CheckPrecompile('test1.pas','src',SharedParams);
 end;
 
 procedure TTestCLI_Precompile.TestPCU_UnitCycle;
@@ -382,6 +430,35 @@ begin
     '  i[2]:=i[3];',
     'end.']);
   CheckPrecompile('test1.pas','src');
+end;
+
+procedure TTestCLI_Precompile.TestPCU_Namespace;
+begin
+  AddUnit('src/system.pp',[
+    'type integer = longint;',
+    'procedure Writeln; varargs;'],
+    ['procedure Writeln; begin end;']);
+  AddUnit('src/Web.Unit1.pp',[
+    'var i: integer;',
+    ''],[
+    '']);
+  AddUnit('src/Unit2.pp',[
+    'uses WEB.uNit1;',
+    'procedure DoIt;',
+    ''],[
+    'procedure DoIt;',
+    'begin',
+    '  writeln(i);',
+    'end;',
+    '']);
+  AddFile('test1.pas',[
+    'uses unIT2;',
+    'begin',
+    '  DoIt;',
+    'end.']);
+  CheckPrecompile('test1.pas','src');
+  AssertFileExists(UnitOutputDir+'/Unit2.'+PCUFormat.Ext);
+  AssertFileExists(UnitOutputDir+'/Web.Unit1.'+PCUFormat.Ext);
 end;
 
 Initialization

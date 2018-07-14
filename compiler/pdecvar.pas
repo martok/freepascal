@@ -620,8 +620,11 @@ implementation
                               { same as for _FALSE }
                               exclude(p.propoptions,ppo_stored)
                             else
-                              { same as for _TRUE }
-                              p.default:=longint($80000000);
+                              begin
+                                { same as for _TRUE }
+                                { do nothing - ppo_stored is already set to p.propoptions in "include(p.propoptions,ppo_stored);" above }
+                                { especially do not reset the default value - the stored specifier is independent on the default value! }
+                              end;
                             consume(_ID);
                           end
                        else if parse_symlist(p.propaccesslist[palt_stored],def) then
@@ -666,7 +669,7 @@ implementation
                   end;
               end;
            end;
-         if has_implicit_default(p) then
+         if has_implicit_default(p) and not assigned(p.overriddenpropsym) then
            begin
               p.default:=0;
            end;
@@ -1785,6 +1788,8 @@ implementation
                      fieldvs:=tfieldvarsym(sc[i]);
                      fieldvs.visibility:=visibility;
                      hstaticvs:=make_field_static(recst,fieldvs);
+                     if vd_threadvar in options then
+                       include(hstaticvs.varoptions,vo_is_thread_var);
                      if not parse_generic then
                        cnodeutils.insertbssdata(hstaticvs);
                      if vd_final in options then

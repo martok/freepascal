@@ -160,6 +160,7 @@ const
     'ISOLikeIO',
     'ISOLikeProgramsPara',
     'ISOLikeMod',
+    'ArrayOperators',
     'ExternalClass',
     'PrefixedAttributes',
     'IgnoreAttributes'
@@ -562,6 +563,10 @@ type
   end;
   TPCUFilerElementRefArray = array of TPCUFilerElementRef;
 
+  TPCUFilerElementRef2 = class(TPCUFilerElementRef)
+    s: string;
+  end;
+
   { TPCUFiler - base class TPCUWriter/TPCUReader}
 
   TPCUFiler = class
@@ -587,6 +592,7 @@ type
     function GetDefaultProcTypeModifiers(ProcType: TPasProcedureType): TProcTypeModifiers; virtual;
     function GetDefaultExprHasEvalValue(Expr: TPasExpr): boolean; virtual;
     function GetSrcCheckSum(aFilename: string): TPCUSourceFileChecksum; virtual;
+    function GetDefaultRefName(El: TPasElement): string; virtual;
     function GetElementReference(El: TPasElement; AutoCreate: boolean = true): TPCUFilerElementRef;
     function CreateElementRef(El: TPasElement): TPCUFilerElementRef; virtual;
     procedure AddedBuiltInRef(Ref: TPCUFilerElementRef); virtual;
@@ -1766,6 +1772,24 @@ begin
   Result:=ComputeChecksum(p,Cnt);
 end;
 
+function TPCUFiler.GetDefaultRefName(El: TPasElement): string;
+var
+  C: TClass;
+begin
+  Result:=El.Name;
+  if Result<>'' then exit;
+  // some elements without name can be referred to:
+  C:=El.ClassType;
+  if C=TInterfaceSection then
+    Result:='Interface'
+  else if C=TPasArrayType then
+    Result:='Array' // anonymous array
+  else if C.InheritsFrom(TPasProcedureType) and (El.Parent is TPasProcedure) then
+    Result:='Type'
+  else
+    Result:='';
+end;
+
 function TPCUFiler.GetElementReference(El: TPasElement; AutoCreate: boolean
   ): TPCUFilerElementRef;
 var
@@ -1802,10 +1826,20 @@ begin
 end;
 
 function TPCUFiler.CreateElementRef(El: TPasElement): TPCUFilerElementRef;
+{$IFDEF MemCheck}
+var
+  Node: TAVLTreeNode;
+{$ENDIF}
 begin
   Result:=TPCUFilerElementRef.Create;
   Result.Element:=El;
+  {$IFDEF MemCheck}
+  Node:=FElementRefs.Add(Result);
+  if Node<>FElementRefs.FindKey(El,@CompareElWithPCUFilerElementRef) then
+    RaiseMsg(20180711222046,El);
+  {$ELSE}
   FElementRefs.Add(Result);
+  {$ENDIF}
 end;
 
 procedure TPCUFiler.AddedBuiltInRef(Ref: TPCUFilerElementRef);
@@ -2014,6 +2048,10 @@ begin
     else
       FLastNewExt.NextNewExt:=Result;
     FLastNewExt:=Result;
+    {$IF defined(VerbosePCUFiler) or defined(VerbosePJUFiler) or defined(VerbosePas2JS)}
+    if (El.Name='') and (GetDefaultRefName(El)='') then
+      RaiseMsg(20180623091608,El);
+    {$ENDIF}
     end;
 end;
 
@@ -2519,6 +2557,12 @@ begin
   Scope:=TPas2JSSectionScope(CheckElScope(Section,20180206121825,TPas2JSSectionScope));
   if not Scope.Finished then
     RaiseMsg(20180206130333,Section);
+
+  WriteBoolSwitches(Obj,'BoolSwitches',Scope.BoolSwitches,aContext.BoolSwitches);
+  aContext.BoolSwitches:=Scope.BoolSwitches;
+  WriteModeSwitches(Obj,'ModeSwitches',Scope.ModeSwitches,aContext.ModeSwitches);
+  aContext.ModeSwitches:=Scope.ModeSwitches;
+
   if Scope.UsesScopes.Count<>length(Section.UsesClause) then
     RaiseMsg(20180206122222,Section);
   Arr:=nil;
@@ -3657,6 +3701,7 @@ begin
   // Mode: TModeSwitch: auto derived
   WriteProcScopeFlags(Obj,'SFlags',Scope.Flags,[]);
   WriteBoolSwitches(Obj,'BoolSwitches',Scope.BoolSwitches,aContext.BoolSwitches);
+  WriteModeSwitches(Obj,'ModeSwitches',Scope.ModeSwitches,aContext.ModeSwitches);
 end;
 
 procedure TPCUWriter.WriteProcedure(Obj: TJSONObject; El: TPasProcedure;
@@ -3760,13 +3805,14 @@ procedure TPCUWriter.WriteExtRefSignature(Ref: TPCUFilerElementRef;
   end;
 
 var
-  Parent: TPasElement;
+  Parent, El: TPasElement;
   C: TClass;
 begin
   //writeln('TPCUWriter.WriteExtRefSignature START ',GetObjName(Ref.Element));
   if aContext=nil then ;
   // write member index
-  Parent:=Ref.Element.Parent;
+  El:=Ref.Element;
+  Parent:=El.Parent;
   C:=Parent.ClassType;
   if C.InheritsFrom(TPasDeclarations) then
     WriteMemberIndex(TPasDeclarations(Parent).Declarations,Ref.Element,Ref.Obj)
@@ -3810,10 +3856,11 @@ begin
   // check name
   Name:=Resolver.GetOverloadName(El);
   if Name='' then
-    if El is TInterfaceSection then
-      Name:='Interface'
-    else
+    begin
+    Name:=GetDefaultRefName(El);
+    if Name='' then
       RaiseMsg(20180308174850,El,GetObjName(El));
+    end;
   // write
   Ref.Obj:=TJSONObject.Create;
   Ref.Obj.Add('Name',Name);
@@ -3924,17 +3971,20 @@ begin
     {$ENDIF}
     Pas2jsFiler.WriteJSON(aJSON,TargetStream,Compressed);
     if Compressed then
-      begin
-      {$IFDEF VerbosePCUFiler}
-      writeln('TPCUWriter.WritePCU zip...');
-      {$ENDIF}
-      Comp:=Tcompressionstream.create(cldefault,aStream);
       try
-        Comp.WriteDWord(TargetStream.Size);
-        Comp.Write(TMemoryStream(TargetStream).Memory^,TargetStream.Size);
-      finally
-        Comp.Free;
-      end;
+        {$IFDEF VerbosePCUFiler}
+        writeln('TPCUWriter.WritePCU zip...');
+        {$ENDIF}
+        Comp:=Tcompressionstream.create(cldefault,aStream);
+        try
+          Comp.WriteDWord(TargetStream.Size);
+          Comp.Write(TMemoryStream(TargetStream).Memory^,TargetStream.Size);
+        finally
+          Comp.Free;
+        end;
+      except
+        on E: Ecompressionerror do
+          RaiseMsg(20180704163113,'compression error: '+E.Message);
       end;
     {$IFDEF VerbosePCUFiler}
     writeln('TPCUWriter.WritePCU END');
@@ -4027,7 +4077,8 @@ begin
   if RefEl is TPasType then
     begin
     El.VarType:=TPasType(RefEl);
-    RefEl.AddRef;
+    if RefEl.Parent<>El then
+      RefEl.AddRef;
     end
   else
     RaiseMsg(20180211121809,El,GetObjName(RefEl));
@@ -4040,7 +4091,8 @@ begin
   if RefEl is TPasType then
     begin
     El.DestType:=TPasType(RefEl);
-    RefEl.AddRef;
+    if RefEl.Parent<>El then
+      RefEl.AddRef;
     end
   else
     RaiseMsg(20180211121801,El,GetObjName(RefEl));
@@ -4054,7 +4106,8 @@ begin
   if RefEl is TPasType then
     begin
     El.DestType:=TPasType(RefEl);
-    RefEl.AddRef;
+    if RefEl.Parent<>El then
+      RefEl.AddRef;
     end
   else
     RaiseMsg(20180211121757,El,GetObjName(RefEl));
@@ -4068,7 +4121,8 @@ begin
   if RefEl is TPasType then
     begin
     El.DestType:=TPasType(RefEl);
-    RefEl.AddRef;
+    if RefEl.Parent<>El then
+      RefEl.AddRef;
     end
   else
     RaiseMsg(20180211121750,El,GetObjName(RefEl));
@@ -4081,7 +4135,8 @@ begin
   if RefEl is TPasType then
     begin
     El.ElType:=TPasType(RefEl);
-    RefEl.AddRef;
+    if RefEl.Parent<>El then
+      RefEl.AddRef;
     end
   else
     RaiseMsg(20180211121732,El,GetObjName(RefEl));
@@ -4094,7 +4149,8 @@ begin
   if RefEl is TPasType then
     begin
     El.ElType:=TPasType(RefEl);
-    RefEl.AddRef;
+    if RefEl.Parent<>El then
+      RefEl.AddRef;
     end
   else
     RaiseMsg(20180211121726,El,GetObjName(RefEl));
@@ -4107,7 +4163,8 @@ begin
   if RefEl is TPasType then
     begin
     El.EnumType:=TPasType(RefEl);
-    RefEl.AddRef;
+    if RefEl.Parent<>El then
+      RefEl.AddRef;
     end
   else
     RaiseMsg(20180211121714,El,GetObjName(RefEl));
@@ -4120,7 +4177,8 @@ begin
   if RefEl is TPasRecordType then
     begin
     El.Members:=TPasRecordType(RefEl);
-    RefEl.AddRef;
+    if RefEl.Parent<>El then
+      RefEl.AddRef;
     end
   else
     RaiseMsg(20180211121657,El,GetObjName(RefEl));
@@ -4134,7 +4192,8 @@ begin
   if (RefEl is TPasType) or (RefEl.ClassType=TPasVariable) then
     begin
     El.VariantEl:=RefEl;
-    RefEl.AddRef;
+    if RefEl.Parent<>El then
+      RefEl.AddRef;
     end
   else
     RaiseMsg(20180210205031,El,GetObjName(RefEl));
@@ -4147,7 +4206,8 @@ begin
   if RefEl is TPasType then
     begin
     El.ArgType:=TPasType(RefEl);
-    RefEl.AddRef;
+    if RefEl.Parent<>El then
+      RefEl.AddRef;
     end
   else
     RaiseMsg(20180211121643,El,GetObjName(RefEl));
@@ -4215,7 +4275,8 @@ begin
   if RefEl is TPasType then
     begin
     El.AncestorType:=TPasType(RefEl);
-    RefEl.AddRef;
+    if RefEl.Parent<>El then
+      RefEl.AddRef;
     end
   else
     RaiseMsg(20180211121632,El,GetObjName(RefEl));
@@ -4229,7 +4290,8 @@ begin
   if RefEl is TPasType then
     begin
     El.HelperForType:=TPasType(RefEl);
-    RefEl.AddRef;
+    if RefEl.Parent<>El then
+      RefEl.AddRef;
     end
   else
     RaiseMsg(20180211121612,El,GetObjName(RefEl));
@@ -4243,7 +4305,8 @@ begin
   if RefEl is TPasType then
     begin
     El.ResultType:=TPasType(RefEl);
-    RefEl.AddRef;
+    if RefEl.Parent<>El then
+      RefEl.AddRef;
     end
   else
     RaiseMsg(20180211121537,El,GetObjName(RefEl));
@@ -4322,7 +4385,8 @@ begin
     begin
     Scope:=El.CustomData as TPasEnumTypeScope;
     Scope.CanonicalSet:=TPasSetType(RefEl);
-    RefEl.AddRef;
+    if RefEl.Parent<>El then
+      RefEl.AddRef;
     end
   else
     RaiseMsg(20180316215238,Scope.Element,GetObjName(RefEl));
@@ -4519,6 +4583,9 @@ var
   RefItem: TPCUFilerPendingElRef;
   PendingElRef: TPCUReaderPendingElRef;
   PendingElListRef: TPCUReaderPendingElListRef;
+  {$IF defined(VerbosePCUFiler) or defined(memcheck)}
+  Node: TAVLTreeNode;
+  {$ENDIF}
 begin
   if Id<=0 then
     RaiseMsg(20180207151233,ErrorEl);
@@ -4544,18 +4611,30 @@ begin
       end
     else
       begin
-      Ref:=TPCUFilerElementRef.Create;
+      Ref:=TPCUFilerElementRef2.Create;
+      TPCUFilerElementRef2(Ref).s:=IntToStr(Id);
       Ref.Id:=Id;
       end;
+    {$IF defined(VerbosePCUFiler) or defined(memcheck)}
+    if FElementRefsArray[Id]<>nil then
+      RaiseMsg(20180711212859,ErrorEl,IntToStr(Id)+' is not FElementRefsArray[Id]');
+    {$ENDIF}
     FElementRefsArray[Id]:=Ref;
     end;
   Result:=Ref;
 
-  if El=nil then exit;
-
-  if Ref.Element=nil then
+  if El=nil then
+    exit
+  else if Ref.Element=nil then
     begin
     Ref.Element:=El;
+    {$IF defined(VerbosePCUFiler) or defined(memcheck)}
+    Node:=FElementRefs.FindKey(El,@CompareElWithPCUFilerElementRef);
+    if Node<>nil then
+      RaiseMsg(20180711231646,El,GetObjName(TPCUFilerElementRef2(Node.Data).Element));
+    {$ENDIF}
+    FElementRefs.Add(Ref);
+
     if Ref.Pending<>nil then
       begin
       // resolve pending references
@@ -5297,6 +5376,8 @@ procedure TPCUReader.ReadSectionScope(Obj: TJSONObject;
 begin
   ReadIdentifierScope(Obj,Scope,aContext);
   // not needed: Scope ElevatedLocals
+  Scope.BoolSwitches:=ReadBoolSwitches(Obj,Scope.Element,'BoolSwitches',aContext.BoolSwitches);
+  Scope.ModeSwitches:=ReadModeSwitches(Obj,Scope.Element,'ModeSwitches',aContext.ModeSwitches);
 end;
 
 procedure TPCUReader.ReadSection(Obj: TJSONObject; Section: TPasSection;
@@ -5327,11 +5408,17 @@ begin
   ReadUsedUnitsFinish(Obj,Section,aContext);
   // read scope, needs external refs
   ReadSectionScope(Obj,Scope,aContext);
+  aContext.BoolSwitches:=Scope.BoolSwitches;
+  aContext.ModeSwitches:=Scope.ModeSwitches;
   // read declarations, needs external refs
   ReadDeclarations(Obj,Section,aContext);
+
   Scope.Finished:=true;
   if Section is TInterfaceSection then
+    begin
+    ResolvePending;
     Resolver.NotifyPendingUsedInterfaces;
+    end;
 end;
 
 procedure TPCUReader.ReadDeclarations(Obj: TJSONObject; Section: TPasSection;
@@ -5341,6 +5428,7 @@ var
   i: Integer;
   Data: TJSONData;
   El: TPasElement;
+  C: TClass;
 begin
   if not ReadArray(Obj,'Declarations',Arr,Section) then exit;
   {$IFDEF VerbosePCUFiler}
@@ -5353,6 +5441,26 @@ begin
       RaiseMsg(20180207182304,Section,IntToStr(i)+' '+GetObjName(Data));
     El:=ReadElement(TJSONObject(Data),Section,aContext);
     Section.Declarations.Add(El);
+    C:=El.ClassType;
+    if C=TPasResString then
+      Section.ResStrings.Add(El)
+    else if C=TPasConst then
+      Section.Consts.Add(El)
+    else if C=TPasClassType then
+      Section.Classes.Add(El)
+    else if C=TPasRecordType then
+      Section.Classes.Add(El)
+    else if C.InheritsFrom(TPasType) then
+      // not TPasClassType, TPasRecordType !
+      Section.Types.Add(El)
+    else if C.InheritsFrom(TPasProcedure) then
+      Section.Functions.Add(El)
+    else if C=TPasVariable then
+      Section.Variables.Add(El)
+    else if C=TPasProperty then
+      Section.Properties.Add(El)
+    else if C=TPasExportSymbol then
+      Section.ExportSymbols.Add(El);
     end;
 end;
 
@@ -5494,7 +5602,7 @@ begin
       end;
     'TypeAlias':
       begin
-      Result:=TPasPointerType.Create(Name,Parent);
+      Result:=TPasTypeAliasType.Create(Name,Parent);
       ReadAliasType(Obj,TPasTypeAliasType(Result),aContext);
       end;
     'ClassOf':
@@ -6207,6 +6315,7 @@ var
   OldBoolSwitches: TBoolSwitches;
   Prog: TPasProgram;
   Lib: TPasLibrary;
+  OldModeSwitches: TModeSwitches;
 begin
   Result:=false;
   {$IFDEF VerbosePCUFiler}
@@ -6217,6 +6326,7 @@ begin
 
   OldBoolSwitches:=aContext.BoolSwitches;
   aContext.BoolSwitches:=ModScope.BoolSwitches;
+  OldModeSwitches:=aContext.ModeSwitches;
   try
     // read sections
     if aModule.ClassType=TPasProgram then
@@ -6262,6 +6372,7 @@ begin
       end;
   finally
     aContext.BoolSwitches:=OldBoolSwitches;
+    aContext.ModeSwitches:=OldModeSwitches;
   end;
 
   ResolvePending;
@@ -7166,15 +7277,9 @@ begin
   // ClassScope: TPasClassScope; auto derived
   // Scope.SelfArg only valid for method implementation
 
-  if msDelphi in aContext.ModeSwitches then
-    Scope.Mode:=msDelphi
-  else if msObjfpc in aContext.ModeSwitches then
-    Scope.Mode:=msObjfpc
-  else
-    RaiseMsg(20180213220335,Scope.Element);
-
   Scope.Flags:=ReadProcScopeFlags(Obj,Proc,'SFlags',[]);
   Scope.BoolSwitches:=ReadBoolSwitches(Obj,Proc,'BoolSwitches',aContext.BoolSwitches);
+  Scope.ModeSwitches:=ReadModeSwitches(Obj,Proc,'ModeSwitches',aContext.ModeSwitches);
 
   //ReadIdentifierScope(Obj,Scope,aContext);
 end;
@@ -7353,6 +7458,7 @@ begin
     PendingIdentifierScope:=TPCUReaderPendingIdentifierScope(FPendingIdentifierScopes[i]);
     ReadIdentifierScopeArray(PendingIdentifierScope.Arr,PendingIdentifierScope.Scope);
     end;
+  FPendingIdentifierScopes.Clear;
 
   Node:=FElementRefs.FindLowest;
   while Node<>nil do
@@ -7457,13 +7563,19 @@ end;
 
 destructor TPCUReader.Destroy;
 begin
+  FreeAndNil(FJSON);
   inherited Destroy;
   FreeAndNil(FPendingIdentifierScopes);
   FreeAndNil(FInitialFlags);
 end;
 
 procedure TPCUReader.Clear;
+var
+  i: Integer;
 begin
+  for i:=0 to length(FElementRefsArray)-1 do
+    if (FElementRefsArray[i]<>nil) and (FElementRefsArray[i].Element=nil) then
+      FElementRefsArray[i].Free;
   FElementRefsArray:=nil;
   FPendingIdentifierScopes.Clear;
   inherited Clear;
@@ -7480,6 +7592,7 @@ var
   Count: Cardinal;
   Src: TStream;
 begin
+  FirstBytes:='';
   SetLength(FirstBytes,4);
   if aStream.Read(FirstBytes[1],4)<4 then
     RaiseMsg(20180313232754,nil);
@@ -7490,16 +7603,21 @@ begin
   try
     if Compressed then
       begin
-      Decomp:=Tdecompressionstream.create(aStream);
       try
-        Count:=Decomp.ReadDWord;
-        if Count>123456789 then
-          RaiseMsg(20180313233209,'too big, invalid format');
-        Src:=TMemoryStream.Create;
-        Src.Size:=Count;
-        Decomp.read(TMemoryStream(Src).Memory^,Src.Size);
-      finally
-        Decomp.Free;
+        Decomp:=Tdecompressionstream.create(aStream);
+        try
+          Count:=Decomp.ReadDWord;
+          if Count>123456789 then
+            RaiseMsg(20180313233209,'too big, invalid format');
+          Src:=TMemoryStream.Create;
+          Src.Size:=Count;
+          Decomp.read(TMemoryStream(Src).Memory^,Src.Size);
+        finally
+          Decomp.Free;
+        end;
+      except
+        on E: Edecompressionerror do
+          RaiseMsg(20180704162214,'decompression error, file corrupt: '+E.Message);
       end;
       Src.Position:=0;
       end
@@ -7535,13 +7653,13 @@ var
   Data: TJSONData;
   i: Integer;
 begin
-  {$IFDEF VerbosePCUFiler}
-  writeln('TPCUReader.ReadJSONHeader START ');
-  {$ENDIF}
   FResolver:=aResolver;
   FParser:=Resolver.CurrentParser;
   FScanner:=FParser.Scanner;
   FJSON:=Obj;
+  {$IF defined(VerbosePCUFiler) or defined(VerboseUnitQueue)}
+  writeln('TPCUReader.ReadJSONHeader START ');
+  {$ENDIF}
 
   ReadHeaderMagic(Obj);
   ReadHeaderVersion(Obj);
@@ -7583,8 +7701,8 @@ var
   Obj, SubObj: TJSONObject;
   aContext: TPCUReaderContext;
 begin
-  {$IFDEF VerbosePCUFiler}
-  writeln('TPCUReader.ReadJSONContinue START');
+  {$IF defined(VerbosePCUFiler) or defined(VerboseUnitQueue)}
+  writeln('TPCUReader.ReadContinue START ',Resolver.RootElement.Name);
   {$ENDIF}
   Obj:=JSON;
   if not ReadObject(Obj,'Module',SubObj,nil) then
@@ -7595,8 +7713,8 @@ begin
   finally
     aContext.Free;
   end;
-  {$IFDEF VerbosePCUFiler}
-  writeln('TPCUReader.ReadJSONContinue END');
+  {$IF defined(VerbosePCUFiler) or defined(VerboseUnitQueue)}
+  writeln('TPCUReader.ReadContinue END');
   {$ENDIF}
 end;
 

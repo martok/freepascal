@@ -592,6 +592,9 @@ Type
   PUnicodeChar        = ^UnicodeChar;
   PUnicodeString      = ^UnicodeString;
 
+  PMarshaledString    = ^PWideChar;
+  PMarshaledAString   = ^PAnsiChar;
+
   MarshaledString     = PWideChar;
   MarshaledAString    = PAnsiChar;
 
@@ -688,6 +691,9 @@ type
 (* Return value of true means that the signal has been processed, false  *)
 (* means that default handling should be used. *)
   TCtrlBreakHandler = function (CtrlBreak: boolean): boolean;
+
+{ Numbers for routines that have compiler magic }
+{$I innr.inc}
 
 { CPU specific stuff }
 {$i cpuh.inc}
@@ -787,9 +793,6 @@ Var
   WriteErrorsToStdErr : Boolean = True;
 
 function StackTop: Pointer;
-
-{ Numbers for routines that have compiler magic }
-{$I innr.inc}
 
 
 {****************************************************************************

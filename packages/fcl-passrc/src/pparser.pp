@@ -198,6 +198,8 @@ type
     function CheckPendingUsedInterface(Section: TPasSection): boolean; virtual; // true if changed
     function NeedArrayValues(El: TPasElement): boolean; virtual;
     function GetDefaultClassVisibility(AClass: TPasClassType): TPasMemberVisibility; virtual;
+    procedure ModeChanged(Sender: TObject; NewMode: TModeSwitch;
+      Before: boolean; var Handled: boolean); virtual;
     property Package: TPasPackage read FPackage;
     property InterfaceOnly : Boolean Read FInterfaceOnly Write FInterFaceOnly;
     property ScannerLogEvents : TPScannerLogEvents Read FScannerLogEvents Write FScannerLogEvents;
@@ -264,7 +266,9 @@ type
     procedure DumpCurToken(Const Msg : String; IndentAction : TIndentAction = iaNone);
     function GetCurrentModeSwitches: TModeSwitches;
     Procedure SetCurrentModeSwitches(AValue: TModeSwitches);
-    function GetVariableModifiers(Parent: TPasElement; Out VarMods: TVariableModifiers; Out LibName, ExportName: TPasExpr; ExternalClass : Boolean): string;
+    function GetVariableModifiers(Parent: TPasElement;
+      Out VarMods: TVariableModifiers; Out LibName, ExportName: TPasExpr;
+      const AllowedMods: TVariableModifiers): string;
     function GetVariableValueAndLocation(Parent : TPasElement; Out Value: TPasExpr; Out AbsoluteExpr: TPasExpr; Out Location: String): Boolean;
     procedure HandleProcedureModifier(Parent: TPasElement; pm : TProcedureModifier);
     procedure HandleProcedureTypeModifier(ProcType: TPasProcedureType; ptm : TProcTypeModifier);
@@ -272,6 +276,8 @@ type
     procedure ParseClassLocalTypes(AType: TPasClassType; AVisibility: TPasMemberVisibility);
     procedure ParseVarList(Parent: TPasElement; VarList: TFPList; AVisibility: TPasMemberVisibility; Full: Boolean);
     procedure SetOptions(AValue: TPOptions);
+    procedure OnScannerModeChanged(Sender: TObject; NewMode: TModeSwitch;
+      Before: boolean; var Handled: boolean);
   protected
     Function SaveComments : String;
     Function SaveComments(Const AValue : String) : String;
@@ -337,8 +343,9 @@ type
     function DoParseConstValueExpression(AParent: TPasElement): TPasExpr;
     function CheckPackMode: TPackMode;
     function AddUseUnit(ASection: TPasSection; const NamePos: TPasSourcePos;
-      AUnitName : string; NameExpr: TPasExpr; InFileExpr: TPrimitiveExpr): TPasElement;
+      AUnitName : string; NameExpr: TPasExpr; InFileExpr: TPrimitiveExpr): TPasUsesUnit;
     procedure CheckImplicitUsedUnits(ASection: TPasSection);
+    procedure FinishedModule; virtual;
     // Overload handling
     procedure AddProcOrFunction(Decs: TPasDeclarations; AProc: TPasProcedure);
     function  CheckIfOverloaded(AParent: TPasElement; const AName: String): TPasElement;
@@ -430,11 +437,11 @@ type
     property Engine: TPasTreeContainer read FEngine;
     property CurToken: TToken read FCurToken;
     property CurTokenString: String read FCurTokenString;
-    Property Options : TPOptions Read FOptions Write SetOptions;
-    Property CurrentModeswitches : TModeSwitches Read GetCurrentModeSwitches Write SetCurrentModeSwitches;
-    Property CurModule : TPasModule Read FCurModule;
-    Property LogEvents : TPParserLogEvents Read FLogEvents Write FLogEvents;
-    Property OnLog : TPasParserLogHandler Read FOnLog Write FOnLog;
+    property Options : TPOptions Read FOptions Write SetOptions;
+    property CurrentModeswitches : TModeSwitches Read GetCurrentModeSwitches Write SetCurrentModeSwitches;
+    property CurModule : TPasModule Read FCurModule;
+    property LogEvents : TPParserLogEvents Read FLogEvents Write FLogEvents;
+    property OnLog : TPasParserLogHandler Read FOnLog Write FOnLog;
     property ImplicitUses: TStrings read FImplicitUses;
     property LastMsg: string read FLastMsg write FLastMsg;
     property LastMsgNumber: integer read FLastMsgNumber write FLastMsgNumber;
@@ -580,6 +587,7 @@ var
     s: String;
   begin
     l := CurPos - Start;
+    s:='';
     SetLength(s, l);
     if l > 0 then
       Move(Start^, s[1], l)
@@ -805,6 +813,15 @@ begin
   if AClass=nil then ;  // avoid compiler warning
 end;
 
+procedure TPasTreeContainer.ModeChanged(Sender: TObject; NewMode: TModeSwitch;
+  Before: boolean; var Handled: boolean);
+begin
+  if Sender=nil then ;
+  if NewMode=msDelphi then ;
+  if Before then ;
+  if Handled then ;
+end;
+
 { ---------------------------------------------------------------------
   EParserError
   ---------------------------------------------------------------------}
@@ -871,6 +888,8 @@ constructor TPasParser.Create(AScanner: TPascalScanner;
 begin
   inherited Create;
   FScanner := AScanner;
+  if FScanner.OnModeChanged=nil then
+    FScanner.OnModeChanged:=@OnScannerModeChanged;
   FFileResolver := AFileResolver;
   FTokenRingCur:=High(FTokenRing);
   FEngine := AEngine;
@@ -888,6 +907,8 @@ destructor TPasParser.Destroy;
 var
   i: Integer;
 begin
+  if FScanner.OnModeChanged=@OnScannerModeChanged then
+    FScanner.OnModeChanged:=nil;
   if Assigned(FEngine) then
     begin
     FEngine.CurrentParser:=Nil;
@@ -2019,7 +2040,7 @@ function TPasParser.ParseExpIdent(AParent: TPasElement): TPasExpr;
       begin
       N:=LowerCase(TPrimitiveExpr(P).Value);
       // We should actually resolve this to system.NNN
-      Result:=(N='write') or (N='str') or (N='writeln');
+      Result:=(N='write') or (N='str') or (N='writeln') or (N='writestr');
       end;
   end;
 
@@ -2786,7 +2807,7 @@ begin
       {$ENDIF}
       end;
     if HasFinished then
-      Engine.FinishScope(stModule,Module);
+      FinishedModule;
   finally
     if HasFinished then
       FCurModule:=nil; // clear module if there is an error or finished parsing
@@ -2883,7 +2904,7 @@ begin
     if Section.PendingUsedIntf<>nil then
       HasFinished:=false;
     if HasFinished then
-      Engine.FinishScope(stModule,CurModule);
+      FinishedModule;
   finally
     if HasFinished then
       FCurModule:=nil; // clear module if there is an error or finished parsing
@@ -2966,7 +2987,7 @@ begin
       exit;
       end;
     ParseDeclarations(Section);
-    Engine.FinishScope(stModule,Module);
+    FinishedModule;
   finally
     if HasFinished then
       FCurModule:=nil; // clear module if there is an error or finished parsing
@@ -3014,7 +3035,7 @@ begin
     if not HasFinished then
       exit;
     ParseDeclarations(Section);
-    Engine.FinishScope(stModule,Module);
+    FinishedModule;
   finally
     if HasFinished then
       FCurModule:=nil; // clear module if there is an error or finished parsing
@@ -3193,7 +3214,8 @@ begin
     else
       Scanner.UnSetTokenOption(toOperatorToken);
     NextToken;
-  //  writeln('TPasParser.ParseSection Token=',CurTokenString,' ',CurToken, ' ',scanner.CurFilename);
+    Scanner.SkipGlobalSwitches:=true;
+  //  writeln('TPasParser.ParseDeclarations Token=',CurTokenString,' ',CurToken, ' ',scanner.CurFilename);
     case CurToken of
       tkend:
         begin
@@ -3495,7 +3517,7 @@ end;
 
 function TPasParser.AddUseUnit(ASection: TPasSection;
   const NamePos: TPasSourcePos; AUnitName: string; NameExpr: TPasExpr;
-  InFileExpr: TPrimitiveExpr): TPasElement;
+  InFileExpr: TPrimitiveExpr): TPasUsesUnit;
 
   procedure CheckDuplicateInUsesList(AUnitName : string; UsesClause: TPasUsesClause);
   var
@@ -3513,6 +3535,7 @@ var
 begin
   Result:=nil;
   UsesUnit:=nil;
+  UnitRef:=nil;
   try
     {$IFDEF VerbosePasParser}
     writeln('TPasParser.AddUseUnit AUnitName=',AUnitName,' CurModule.Name=',CurModule.Name);
@@ -3555,6 +3578,8 @@ begin
         NameExpr.Release;
       if InFileExpr<>nil then
         InFileExpr.Release;
+      if UnitRef<>nil then
+        UnitRef.Release;
       end;
   end;
 end;
@@ -3573,6 +3598,13 @@ begin
     end;
 end;
 
+procedure TPasParser.FinishedModule;
+begin
+  if Scanner<>nil then
+    Scanner.FinishedModule;
+  Engine.FinishScope(stModule,CurModule);
+end;
+
 // Starts after the "uses" token
 procedure TPasParser.ParseUsesList(ASection: TPasSection);
 var
@@ -3583,6 +3615,7 @@ var
   NamePos, SrcPos: TPasSourcePos;
   aModule: TPasModule;
 begin
+  Scanner.SkipGlobalSwitches:=true;
   NameExpr:=nil;
   InFileExpr:=nil;
   FreeExpr:=true;
@@ -4055,7 +4088,7 @@ end;
 
 function TPasParser.GetVariableModifiers(Parent: TPasElement; out
   VarMods: TVariableModifiers; out LibName, ExportName: TPasExpr;
-  ExternalClass: Boolean): string;
+  const AllowedMods: TVariableModifiers): string;
 
 Var
   S : String;
@@ -4066,7 +4099,7 @@ begin
   ExportName := nil;
   VarMods := [];
   NextToken;
-  If CurTokenIsIdentifier('cvar') and not ExternalClass then
+  If (vmCVar in AllowedMods) and CurTokenIsIdentifier('cvar') then
     begin
     Result:=';cvar';
     Include(VarMods,vmcvar);
@@ -4074,11 +4107,11 @@ begin
     NextToken;
     end;
   s:=LowerCase(CurTokenText);
-  if s='external' then
+  if (vmExternal in AllowedMods) and (s='external') then
     ExtMod:=vmExternal
-  else if (s='public') and not externalclass then
+  else if (vmPublic in AllowedMods) and (s='public') then
     ExtMod:=vmPublic
-  else if (s='export') and not externalclass then
+  else if (vmExport in AllowedMods) and (s='export') then
     ExtMod:=vmExport
   else
     begin
@@ -4103,7 +4136,7 @@ begin
   // external libname name exportname;
   // external name exportname;
   if (ExtMod=vmExternal) and (CurToken in [tkString,tkIdentifier])
-      and Not (CurTokenIsIdentifier('name')) and not ExternalClass then
+      and Not (CurTokenIsIdentifier('name')) then
     begin
     Result := Result + ' ' + CurTokenText;
     LibName:=DoParseExpression(Parent);
@@ -4129,9 +4162,9 @@ var
   VarType: TPasType;
   VarEl: TPasVariable;
   H : TPasMemberHints;
-  VarMods: TVariableModifiers;
+  VarMods, AllowedVarMods: TVariableModifiers;
   D,Mods,AbsoluteLocString: string;
-  OldForceCaret,ok,ExternalClass: Boolean;
+  OldForceCaret,ok,ExternalStruct: Boolean;
 
 begin
   Value:=Nil;
@@ -4179,25 +4212,30 @@ begin
       begin
       // multiple variables
       if Value<>nil then
-        ParseExc(nParserOnlyOneVariableCanBeAbsolute,SParserOnlyOneVariableCanBeAbsolute);
-      if Value<>nil then
         ParseExc(nParserOnlyOneVariableCanBeInitialized,SParserOnlyOneVariableCanBeInitialized);
+      if AbsoluteExpr<>nil then
+        ParseExc(nParserOnlyOneVariableCanBeAbsolute,SParserOnlyOneVariableCanBeAbsolute);
       end;
     TPasVariable(VarList[OldListCount]).Expr:=Value;
     Value:=nil;
 
     // Note: external members are allowed for non external classes too
-    ExternalClass:=(msExternalClass in CurrentModeSwitches)
-                    and (Parent is TPasClassType);
+    ExternalStruct:=(msExternalClass in CurrentModeSwitches)
+                    and ((Parent is TPasClassType) or (Parent is TPasRecordType));
 
     H:=H+CheckHint(Nil,False);
-    if Full or Externalclass then
+    if Full or ExternalStruct then
       begin
       NextToken;
       If Curtoken<>tkSemicolon then
         UnGetToken;
       VarEl:=TPasVariable(VarList[0]);
-      Mods:=GetVariableModifiers(VarEl,VarMods,aLibName,aExpName,ExternalClass);
+      AllowedVarMods:=[];
+      if ExternalStruct then
+        AllowedVarMods:=[vmExternal]
+      else
+        AllowedVarMods:=[vmCVar,vmExternal,vmPublic,vmExport];
+      Mods:=GetVariableModifiers(VarEl,VarMods,aLibName,aExpName,AllowedVarMods);
       if (mods='') and (CurToken<>tkSemicolon) then
         NextToken;
       end
@@ -4259,6 +4297,12 @@ begin
   FOptions:=AValue;
   If Assigned(FScanner) then
     FScanner.Options:=AValue;
+end;
+
+procedure TPasParser.OnScannerModeChanged(Sender: TObject;
+  NewMode: TModeSwitch; Before: boolean; var Handled: boolean);
+begin
+  Engine.ModeChanged(Self,NewMode,Before,Handled);
 end;
 
 function TPasParser.SaveComments: String;
@@ -4565,7 +4609,7 @@ begin
     else
       begin
       AddModifier;
-      NextToken;  // Should be export name string.
+      NextToken;  // Should be "public name string".
       if not (CurToken in [tkString,tkIdentifier]) then
         ParseExcTokenError(TokenInfos[tkString]);
       E:=DoParseExpression(Parent);

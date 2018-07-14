@@ -123,6 +123,12 @@ interface
            0 : (bytes:array[0..7] of byte);
            1 : (value:double);
        end;
+       { Use a variant record to be sure that the array if aligned correctly }
+       tcompsinglerec=record
+         case byte of
+           0 : (bytes:array[0..3] of byte);
+           1 : (value:single);
+       end;
        tcompextendedrec=record
          case byte of
            0 : (bytes:array[0..9] of byte);
@@ -142,6 +148,7 @@ interface
          cs_full_boolean_eval,cs_typed_const_writable,cs_allow_enum_calc,
          cs_do_inline,cs_fpu_fwait,cs_ieee_errors,
          cs_check_low_addr_load,cs_imported_data,
+         cs_excessprecision,
          { mmx }
          cs_mmx,cs_mmx_saturation,
          { parser }
@@ -438,7 +445,8 @@ interface
          m_blocks,              { support for http://en.wikipedia.org/wiki/Blocks_(C_language_extension) }
          m_isolike_io,          { I/O as it required by an ISO compatible compiler }
          m_isolike_program_para, { program parameters as it required by an ISO compatible compiler }
-         m_isolike_mod          { mod operation as it is required by an iso compatible compiler }
+         m_isolike_mod,         { mod operation as it is required by an iso compatible compiler }
+         m_array_operators      { use Delphi compatible array operators instead of custom ones ("+") }
        );
        tmodeswitches = set of tmodeswitch;
 
@@ -570,7 +578,7 @@ interface
            'Interrupt',
            'HardFloat',
            'SysV_ABI_Default',
-           'MS_ABI_CDecl', { TODO: Is this correct? Shouldn't it be SysV_ABI_Default }
+           'SysV_ABI_CDecl',
            'MS_ABI_Default',
            'MS_ABI_CDecl',
            'VectorCall'
@@ -626,7 +634,8 @@ interface
          'CBLOCKS',
          'ISOIO',
          'ISOPROGRAMPARAS',
-         'ISOMOD'
+         'ISOMOD',
+         'ARRAYOPERATORS'
          );
 
 

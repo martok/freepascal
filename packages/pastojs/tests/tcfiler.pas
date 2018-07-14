@@ -148,6 +148,7 @@ type
     procedure TestPC_Proc_LocalConst;
     procedure TestPC_Proc_UTF8;
     procedure TestPC_Proc_Arg;
+    procedure TestPC_ProcType;
     procedure TestPC_Class;
     procedure TestPC_ClassForward;
     procedure TestPC_ClassConstructor;
@@ -388,6 +389,7 @@ begin
 
     // convert using the precompiled procs
     RestConverter:=CreateConverter;
+    RestConverter.Options:=Converter.Options;
     RestConverter.OnIsElementUsed:=@OnRestConverterIsElementUsed;
     RestConverter.OnIsTypeInfoUsed:=@OnRestConverterIsTypeInfoUsed;
     try
@@ -654,6 +656,10 @@ var
   i: Integer;
   OrigUses, RestUses: TPas2JSSectionScope;
 begin
+  if Orig.BoolSwitches<>Rest.BoolSwitches then
+    Fail(Path+'.BoolSwitches Orig='+BoolSwitchesToStr(Orig.BoolSwitches)+' Rest='+BoolSwitchesToStr(Rest.BoolSwitches));
+  if Orig.ModeSwitches<>Rest.ModeSwitches then
+    Fail(Path+'.ModeSwitches');
   AssertEquals(Path+' UsesScopes.Count',Orig.UsesScopes.Count,Rest.UsesScopes.Count);
   for i:=0 to Orig.UsesScopes.Count-1 do
     begin
@@ -792,11 +798,12 @@ begin
 
     CheckRestoredScopeReference(Path+'.ClassScope',Orig.ClassScope,Rest.ClassScope);
     CheckRestoredElement(Path+'.SelfArg',Orig.SelfArg,Rest.SelfArg);
-    AssertEquals(Path+'.Mode',PCUModeSwitchNames[Orig.Mode],PCUModeSwitchNames[Rest.Mode]);
     if Orig.Flags<>Rest.Flags then
       Fail(Path+'.Flags');
     if Orig.BoolSwitches<>Rest.BoolSwitches then
       Fail(Path+'.BoolSwitches');
+    if Orig.ModeSwitches<>Rest.ModeSwitches then
+      Fail(Path+'.ModeSwitches');
 
     //CheckRestoredIdentifierScope(Path,Orig,Rest);
     end
@@ -1826,6 +1833,32 @@ begin
   WriteReadUnit;
 end;
 
+procedure TTestPrecompile.TestPC_ProcType;
+begin
+  StartUnit(false);
+  Add([
+  '{$modeswitch arrayoperators}',
+  'interface',
+  'type',
+  '  TProc = procedure;',
+  '  TArrProc = array of tproc;',
+  'procedure Mark;',
+  'procedure DoIt(const a: TArrProc);',
+  'implementation',
+  'procedure Mark;',
+  'var',
+  '  p: TProc;',
+  '  a: TArrProc;',
+  'begin',
+  '  DoIt([@Mark,p]+a);',
+  'end;',
+  'procedure DoIt(const a: TArrProc);',
+  'begin',
+  'end;',
+  '']);
+  WriteReadUnit;
+end;
+
 procedure TTestPrecompile.TestPC_Class;
 begin
   StartUnit(false);
@@ -1857,11 +1890,13 @@ end;
 
 procedure TTestPrecompile.TestPC_ClassForward;
 begin
+  Converter.Options:=Converter.Options-[coNoTypeInfo];
   StartUnit(false);
   Add([
   'interface',
   'type',
   '  TObject = class end;',
+  '  TFish = class;',
   '  TBird = class;',
   '  TBirdClass = class of TBird;',
   '  TFish = class',
@@ -1870,10 +1905,12 @@ begin
   '  TBird = class',
   '    F: TFish;',
   '  end;',
+  '  TFishClass = class of TFish;',
   'var',
   '  b: tbird;',
   '  f: tfish;',
   '  bc: TBirdClass;',
+  '  fc: TFishClass;',
   'implementation',
   'end.'
   ]);

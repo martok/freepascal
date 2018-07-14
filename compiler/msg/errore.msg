@@ -436,7 +436,7 @@ scan_n_changecputype=02105_N_Changed CPU type to be consistent with specified co
 #
 # Parser
 #
-# 03346 is the last used one
+# 03348 is the last used one
 #
 % \section{Parser messages}
 % This section lists all parser messages. The parser takes care of the
@@ -842,7 +842,7 @@ parser_f_assembler_reader_not_supported=03127_F_Selected assembler reader not su
 % The selected assembler reader (with \var{\{\$ASMMODE xxx\}} is not
 % supported. The compiler can be compiled with or without support for a
 % particular assembler reader.
-parser_e_proc_dir_conflict=03128_E_Procedure directive "$1" has conflicts with other directives
+parser_e_proc_dir_conflict=03128_E_Procedure directive "$1" cannot be used with $2
 % You specified a procedure directive that conflicts with other directives.
 % For instance \var{cdecl} and \var{pascal} are mutually exclusive.
 parser_e_call_convention_dont_match_forward=03129_E_Calling convention doesn't match forward
@@ -1575,6 +1575,13 @@ parser_e_cannot_use_hardfloat_in_a_softfloat_environment=03345_E_The HardFloat d
 parser_e_invalid_internal_function_index=03346_E_Index $1 is not a valid internal function index
 % The index specified for the \var{compilerproc} directive is not an index that's recognized
 % by the compiler.
+parser_w_operator_overloaded_hidden_3=03347_W_Operator overload hidden by internal operator: "$1" $2 "$3"
+% An operator overload is defined for the specified overload, but the internal overload by the compiler
+% takes precedence. This only happens for operators that had been overloadable before (e.g. dynamic array + dynamic array),
+% but aren't anymore due to an internal operator being defined while this behavior is controllable by a modeswitch
+% (in case of dynamic arrays that is the modeswitch \var{ArrayOperators}).
+parser_e_threadvar_must_be_class=03348_E_Thread variables inside classes or records must be class variables
+% A \var{threadvar} section inside a class or record was started without it being prefixed by \var{class}.
 %
 %
 % \end{description}

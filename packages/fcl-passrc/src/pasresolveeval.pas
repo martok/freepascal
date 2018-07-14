@@ -120,7 +120,7 @@ const
   nExpectXArrayElementsButFoundY = 3047;
   nCannotCreateADescendantOfTheSealedXY = 3048;
   nAncestorIsNotExternal = 3049;
-  // free 3050
+  nPropertyMustHaveReadOrWrite = 3050;
   nExternalClassInstanceCannotAccessStaticX = 3051;
   nXModifierMismatchY = 3052;
   nSymbolCannotBePublished = 3053;
@@ -128,8 +128,8 @@ const
   nTypeIdentifierExpected = 3055;
   nCannotNestAnonymousX = 3056;
   nFoundCallCandidateX = 3057;
-  // free 3058
-  // free 3059
+  nTextAfterFinalIgnored = 3058;
+  nNoMemberIsProvidedToAccessProperty = 3059;
   // free 3060
   // free 3061
   // free 3062
@@ -236,6 +236,7 @@ resourcestring
   sExpectXArrayElementsButFoundY = 'Expect %s array elements, but found %s';
   sCannotCreateADescendantOfTheSealedXY = 'Cannot create a descendant of the sealed %s "%s"';
   sAncestorIsNotExternal = 'Ancestor "%s" is not external';
+  sPropertyMustHaveReadOrWrite = 'Property must have read or write accessor';
   sVirtualMethodXHasLowerVisibility = 'Virtual method "%s" has a lower visibility (%s) than parent class %s (%s)';
   sExternalClassInstanceCannotAccessStaticX = 'External class instance cannot access static %s';
   sXModifierMismatchY = '%s modifier "%s" mismatch';
@@ -244,6 +245,8 @@ resourcestring
   sTypeIdentifierExpected = 'Type identifier expected';
   sCannotNestAnonymousX = 'Cannot nest anonymous %s';
   sFoundCallCandidateX = 'Found call candidate %s';
+  sTextAfterFinalIgnored = 'Text after final ''end.''. ignored by compiler';
+  sNoMemberIsProvidedToAccessProperty = 'No member is provided to access property';
   sSymbolXIsNotPortable = 'Symbol "%s" is not portable';
   sSymbolXIsExperimental = 'Symbol "%s" is experimental';
   sSymbolXIsNotImplemented = 'Symbol "%s" is not implemented';
@@ -3870,7 +3873,7 @@ function TResExprEvaluator.EvalPrimitiveExprString(Expr: TPrimitiveExpr
       // switch to unicodestring
       h:=TResEvalString(Result).S;
       Result.Free;
-      Result:=nil;
+      Result:=nil; // in case of exception in GetUnicodeStr
       Result:=TResEvalUTF16.CreateValue(GetUnicodeStr(h,Expr));
       end;
     if Result.Kind=revkString then
@@ -3943,13 +3946,21 @@ begin
           'A'..'F': u:=u*16+ord(c)-ord('A')+10;
           else break;
           end;
-          if u>$ffff then
+          if u>$10FFFF then
             RangeError(20170523115712);
           inc(p);
         until false;
         if p=StartP then
           RaiseInternalError(20170207164956);
-        AddHash(u);
+        if u>$ffff then
+          begin
+          // split into two
+          dec(u,$10000);
+          AddHash($D800+(u shr 10));
+          AddHash($DC00+(u and $3ff));
+          end
+        else
+          AddHash(u);
         end
       else
         begin

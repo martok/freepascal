@@ -127,6 +127,7 @@ implementation
 {$ENDIF}
       globtype,systems,constexp,compinnr,
       cutils,verbose,globals,widestr,
+      tokens,
       symconst,symdef,symsym,symcpu,symtable,defutil,defcmp,
       cgbase,
       htypechk,pass_1,
@@ -155,8 +156,9 @@ implementation
               begin
                 { when a comp or currency is used, use always the
                   best float type to calculate the result }
-                if (tfloatdef(t2).floattype in [s64comp,s64currency]) or
-                  (tfloatdef(t2).floattype in [s64comp,s64currency]) then
+                if (tfloatdef(t1).floattype in [s64comp,s64currency]) or
+                  (tfloatdef(t2).floattype in [s64comp,s64currency]) or
+                  (cs_excessprecision in current_settings.localswitches) then
                   result:=pbestrealtype^
                 else
                   if floatweight[tfloatdef(t2).floattype]>floatweight[tfloatdef(t1).floattype] then
@@ -1205,6 +1207,72 @@ implementation
               inserttypeconv(n,adef);
           end;
 
+        function maybe_convert_to_insert:tnode;
+
+          function element_count(arrconstr: tarrayconstructornode):asizeint;
+            begin
+              result:=0;
+              while assigned(arrconstr) do
+                begin
+                  if arrconstr.nodetype=arrayconstructorrangen then
+                    internalerror(2018052501);
+                  inc(result);
+                  arrconstr:=tarrayconstructornode(tarrayconstructornode(arrconstr).right);
+                end;
+            end;
+
+          var
+            elem : tnode;
+            para : tcallparanode;
+            isarrconstrl,
+            isarrconstrr : boolean;
+            index : asizeint;
+          begin
+            result:=nil;
+
+            isarrconstrl:=left.nodetype=arrayconstructorn;
+            isarrconstrr:=right.nodetype=arrayconstructorn;
+
+            if not assigned(aktassignmentnode) or
+                (aktassignmentnode.right<>self) or
+                not(
+                  isarrconstrl or
+                  isarrconstrr
+                ) or
+                not(
+                  left.isequal(aktassignmentnode.left) or
+                  right.isequal(aktassignmentnode.left)
+                ) or
+                not valid_for_var(aktassignmentnode.left,false) or
+                (isarrconstrl and (element_count(tarrayconstructornode(left))>1)) or
+                (isarrconstrr and (element_count(tarrayconstructornode(right))>1)) then
+              exit;
+
+            if isarrconstrl then
+              begin
+                index:=0;
+                elem:=tarrayconstructornode(left).left;
+                tarrayconstructornode(left).left:=nil;
+              end
+            else
+              begin
+                index:=high(asizeint);
+                elem:=tarrayconstructornode(right).left;
+                tarrayconstructornode(right).left:=nil;
+              end;
+
+            { we use the fact that insert() caps the index to avoid a copy }
+            para:=ccallparanode.create(
+                    cordconstnode.create(index,sizesinttype,false),
+                    ccallparanode.create(
+                      aktassignmentnode.left.getcopy,
+                      ccallparanode.create(
+                        elem,nil)));
+
+            result:=cinlinenode.create(in_insert_x_y_z,false,para);
+            include(aktassignmentnode.flags,nf_assign_done_in_right);
+          end;
+
       begin
          result:=nil;
          rlow:=0;
@@ -1250,7 +1318,14 @@ implementation
 
          { allow operator overloading }
          hp:=self;
-         if isbinaryoverloaded(hp) then
+
+         if is_dynamic_array(left.resultdef) and is_dynamic_array(right.resultdef) and
+             (nodetype=addn) and
+             (m_array_operators in current_settings.modeswitches) and
+             isbinaryoverloaded(hp,[ocf_check_non_overloadable,ocf_check_only]) then
+           message3(parser_w_operator_overloaded_hidden_3,left.resultdef.typename,arraytokeninfo[_PLUS].str,right.resultdef.typename);
+
+         if isbinaryoverloaded(hp,[]) then
            begin
               result:=hp;
               exit;
@@ -1310,7 +1385,12 @@ implementation
            if (right.resultdef.typ=floatdef) and
               (left.resultdef.typ=floatdef) and
               (tfloatdef(left.resultdef).floattype=tfloatdef(right.resultdef).floattype) then
-             resultrealdef:=left.resultdef
+             begin
+               if cs_excessprecision in current_settings.localswitches then
+                 resultrealdef:=pbestrealtype^
+               else
+                 resultrealdef:=left.resultdef
+             end
            { when there is a currency type then use currency, but
              only when currency is defined as float }
            else
@@ -2124,6 +2204,9 @@ implementation
          { <dyn. array>+<dyn. array> ? }
          else if (nodetype=addn) and (is_dynamic_array(ld) or is_dynamic_array(rd)) then
            begin
+              result:=maybe_convert_to_insert;
+              if assigned(result) then
+                exit;
               if not(is_dynamic_array(ld)) then
                 inserttypeconv(left,rd);
               if not(is_dynamic_array(rd)) then
@@ -3367,7 +3450,7 @@ implementation
          { Can we optimize multiple dyn. array additions into a single call?
            This need to be done on a complete tree to detect the multiple
            add nodes and is therefor done before the subtrees are processed }
-         if canbemultidynarrayadd(self) then
+         if (m_array_operators in current_settings.modeswitches) and canbemultidynarrayadd(self) then
            begin
              result:=genmultidynarrayadd(self);
              exit;

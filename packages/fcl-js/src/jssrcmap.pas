@@ -1,6 +1,6 @@
 { *********************************************************************
     This file is part of the Free Component Library (FCL)
-    Copyright (c) 2015 Mattias Gaertner.
+    Copyright (c) 2018 Mattias Gaertner.
 
     Javascript Source Map
 
@@ -953,6 +953,7 @@ var
   P: TJSONParser;
   Data: TJSONData;
 begin
+  s:='';
   SetLength(s,aStream.Size-aStream.Position);
   if s<>'' then
     aStream.Read(s[1],length(s));

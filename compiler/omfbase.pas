@@ -228,6 +228,9 @@ interface
       ftmGroupIndexNoDisp    = 5,  { GI(<group name>) }
       ftmExternalIndexNoDisp = 6,  { EI(<symbol name>) }
       ftmFrameNumberNoDisp   = 7); { <FRAME NUMBER> }
+    TOmfThreadType = (
+      ttTarget,
+      ttFrame);
 
     { TOmfOrderedNameCollection }
 
@@ -354,6 +357,8 @@ interface
       procedure DecodeFrom(RawRecord: TOmfRawRecord);override;
       procedure EncodeTo(RawRecord: TOmfRawRecord);override;
 
+      procedure MaybeGo32;
+
       property Alignment: TOmfSegmentAlignment read FAlignment write FAlignment;
       property Combination: TOmfSegmentCombination read FCombination write FCombination;
       property Use: TOmfSegmentUse read FUse write FUse;
@@ -378,6 +383,8 @@ interface
       procedure DecodeFrom(RawRecord: TOmfRawRecord);override;
       procedure EncodeTo(RawRecord: TOmfRawRecord);override;
 
+      procedure AddSegmentIndex(segidx: Integer);
+
       property GroupNameIndex: Integer read FGroupNameIndex write FGroupNameIndex;
       property SegmentList: TSegmentList read FSegmentList write FSegmentList;
     end;
@@ -388,11 +395,13 @@ interface
     private
       FPublicOffset: DWord;
       FTypeIndex: Integer;
+      FIsLocal: Boolean;
     public
       function GetLengthInFile(Is32Bit: Boolean): Integer;
 
       property PublicOffset: DWord read FPublicOffset write FPublicOffset;
       property TypeIndex: Integer read FTypeIndex write FTypeIndex;
+      property IsLocal: Boolean read FIsLocal write FIsLocal;
     end;
 
     { TOmfRecord_PUBDEF }
@@ -400,6 +409,7 @@ interface
     TOmfRecord_PUBDEF = class(TOmfParsedRecord)
     private
       FIs32Bit: Boolean;
+      FIsLocal: Boolean;
       FBaseGroupIndex: Integer;
       FBaseSegmentIndex: Integer;
       FBaseFrame: Word;
@@ -410,7 +420,10 @@ interface
       procedure DecodeFrom(RawRecord: TOmfRawRecord);override;
       procedure EncodeTo(RawRecord: TOmfRawRecord);override;
 
+      procedure MaybeGo32;
+
       property Is32Bit: Boolean read FIs32Bit write FIs32Bit;
+      property IsLocal: Boolean read FIsLocal write FIsLocal;
       property BaseGroupIndex: Integer read FBaseGroupIndex write FBaseGroupIndex;
       property BaseSegmentIndex: Integer read FBaseSegmentIndex write FBaseSegmentIndex;
       property BaseFrame: Word read FBaseFrame write FBaseFrame;
@@ -550,6 +563,74 @@ interface
       property LineNumberList: TOmfSubRecord_LINNUM_MsLink_LineNumberList read FLineNumberList write FLineNumberList;
     end;
 
+    { TOmfThread }
+
+    TOmfThread = class
+    private
+      FDatum: Integer;
+      FInitialized: Boolean;
+    public
+      constructor Create;
+      property Datum: Integer read FDatum write FDatum;
+      property Initialized: Boolean read FInitialized write FInitialized;
+    end;
+
+    { TOmfTargetThread }
+
+    TOmfTargetThread = class(TOmfThread)
+    private
+      FTargetMethod: TOmfFixupTargetMethod;
+    public
+      property TargetMethod: TOmfFixupTargetMethod read FTargetMethod write FTargetMethod;
+    end;
+
+    { TOmfFrameThread }
+
+    TOmfFrameThread = class(TOmfThread)
+    private
+      FFrameMethod: TOmfFixupFrameMethod;
+    public
+      property FrameMethod: TOmfFixupFrameMethod read FFrameMethod write FFrameMethod;
+    end;
+
+    { TOmfThreads }
+
+    TOmfThreads = class
+    private
+      FTargetThreads: array [TOmfFixupThread] of TOmfTargetThread;
+      FFrameThreads: array [TOmfFixupThread] of TOmfFrameThread;
+      function GetTargetThread(Index: TOmfFixupThread): TOmfTargetThread;
+      function GetFrameThread(Index: TOmfFixupThread): TOmfFrameThread;
+    public
+      constructor Create;
+      destructor Destroy; override;
+
+      property TargetThread[Index: TOmfFixupThread]: TOmfTargetThread read GetTargetThread;
+      property FrameThread[Index: TOmfFixupThread]: TOmfFrameThread read GetFrameThread;
+    end;
+
+    { TOmfSubRecord_THREAD }
+
+    TOmfSubRecord_THREAD = class
+    private
+      FThreadNumber: TOmfFixupThread;
+      FThreadType: TOmfThreadType;
+      FTargetMethod: TOmfFixupTargetMethod;
+      FFrameMethod: TOmfFixupFrameMethod;
+      FDatum: Integer;
+    public
+      function ReadAt(RawRecord: TOmfRawRecord; Offset: Integer): Integer;
+      function WriteAt(RawRecord: TOmfRawRecord; Offset: Integer): Integer;
+
+      procedure ApplyTo(AThreads: TOmfThreads);
+
+      property ThreadNumber: TOmfFixupThread read FThreadNumber write FThreadNumber;
+      property ThreadType: TOmfThreadType read FThreadType write FThreadType;
+      property TargetMethod: TOmfFixupTargetMethod read FTargetMethod write FTargetMethod;
+      property FrameMethod: TOmfFixupFrameMethod read FFrameMethod write FFrameMethod;
+      property Datum: Integer read FDatum write FDatum;
+    end;
+
     { TOmfSubRecord_FIXUP }
 
     TOmfSubRecord_FIXUP = class
@@ -575,6 +656,8 @@ interface
     public
       function ReadAt(RawRecord: TOmfRawRecord; Offset: Integer): Integer;
       function WriteAt(RawRecord: TOmfRawRecord; Offset: Integer): Integer;
+
+      procedure ResolveByThread(AThreads: TOmfThreads);
 
       property Is32Bit: Boolean read FIs32Bit write FIs32Bit;
       property Mode: TOmfFixupMode read FMode write FMode;
@@ -1180,13 +1263,15 @@ interface
   { returns whether the specified section type belongs to the group DGROUP in
     the current memory model. DGROUP is the segment group pointed by DS }
   function section_belongs_to_dgroup(atype:TAsmSectiontype): Boolean;
+  function omf_section_primary_group(atype:TAsmSectiontype;const aname:string):string;
 
 implementation
 
   uses
     cutils,globtype,globals,
     cpuinfo,
-    verbose;
+    verbose,
+    fmodule;
 
   { TOmfOrderedNameCollection }
 
@@ -1257,6 +1342,7 @@ implementation
     var
       len: Byte;
     begin
+      s:='';
       len:=RawData[Offset];
       Result:=Offset+len+1;
       if result>RecordLength then
@@ -1566,11 +1652,12 @@ implementation
       Big: Boolean;
       NextOfs: Integer;
     begin
+      MaybeGo32;
       if Is32Bit then
         begin
           RawRecord.RecordType:=RT_SEGDEF32;
           if SegmentLength>4294967296 then
-            internalerror(2015040302);
+            internalerror(2015040307);
           Big:=SegmentLength=4294967296;
         end
       else
@@ -1608,6 +1695,12 @@ implementation
       NextOfs:=RawRecord.WriteIndexedRef(NextOfs,OverlayNameIndex);
       RawRecord.RecordLength:=NextOfs+1;
       RawRecord.CalculateChecksumByte;
+    end;
+
+  procedure TOmfRecord_SEGDEF.MaybeGo32;
+    begin
+      if SegmentLength>65536 then
+        Is32Bit:=true;
     end;
 
   { TOmfRecord_GRPDEF }
@@ -1649,9 +1742,15 @@ implementation
       RawRecord.CalculateChecksumByte;
     end;
 
+  procedure TOmfRecord_GRPDEF.AddSegmentIndex(segidx: Integer);
+    begin
+      SetLength(FSegmentList,Length(FSegmentList)+1);
+      FSegmentList[High(FSegmentList)]:=segidx;
+    end;
+
   { TOmfPublicNameElement }
 
-    function TOmfPublicNameElement.GetLengthInFile(Is32Bit: Boolean): Integer;
+  function TOmfPublicNameElement.GetLengthInFile(Is32Bit: Boolean): Integer;
     begin
       Result:=1+Length(Name)+2+1;
       if Is32Bit then
@@ -1670,9 +1769,10 @@ implementation
       PublicOffset: DWord;
       PubName: TOmfPublicNameElement;
     begin
-      if not (RawRecord.RecordType in [RT_PUBDEF,RT_PUBDEF32]) then
+      if not (RawRecord.RecordType in [RT_PUBDEF,RT_PUBDEF32,RT_LPUBDEF,RT_LPUBDEF32]) then
         internalerror(2015040301);
-      Is32Bit:=RawRecord.RecordType=RT_PUBDEF32;
+      Is32Bit:=RawRecord.RecordType in [RT_PUBDEF32,RT_LPUBDEF32];
+      IsLocal:=RawRecord.RecordType in [RT_LPUBDEF,RT_LPUBDEF32];
 
       NextOfs:=RawRecord.ReadIndexedRef(0,FBaseGroupIndex);
       NextOfs:=RawRecord.ReadIndexedRef(NextOfs,FBaseSegmentIndex);
@@ -1706,6 +1806,7 @@ implementation
             end;
           NextOfs:=RawRecord.ReadIndexedRef(NextOfs,TypeIndex);
           PubName:=TOmfPublicNameElement.Create(PublicNames,Name);
+          PubName.IsLocal:=IsLocal;
           PubName.PublicOffset:=PublicOffset;
           PubName.TypeIndex:=TypeIndex;
         end;
@@ -1718,10 +1819,20 @@ implementation
       Len,LastIncludedIndex,NextOfs,I: Integer;
       PubName: TOmfPublicNameElement;
     begin
-      if Is32Bit then
-        RawRecord.RecordType:=RT_PUBDEF32
+      if NextIndex>=PublicNames.Count then
+        internalerror(2018061101);
+      MaybeGo32;
+      IsLocal:=TOmfPublicNameElement(PublicNames[NextIndex]).IsLocal;
+      if IsLocal then
+        if Is32Bit then
+          RawRecord.RecordType:=RT_LPUBDEF32
+        else
+          RawRecord.RecordType:=RT_LPUBDEF
       else
-        RawRecord.RecordType:=RT_PUBDEF;
+        if Is32Bit then
+          RawRecord.RecordType:=RT_PUBDEF32
+        else
+          RawRecord.RecordType:=RT_PUBDEF;
 
       NextOfs:=RawRecord.WriteIndexedRef(0,BaseGroupIndex);
       NextOfs:=RawRecord.WriteIndexedRef(NextOfs,BaseSegmentIndex);
@@ -1738,7 +1849,9 @@ implementation
       repeat
         Inc(LastIncludedIndex);
         Inc(Len,TOmfPublicNameElement(PublicNames[LastIncludedIndex]).GetLengthInFile(Is32Bit));
-      until (LastIncludedIndex>=(PublicNames.Count-1)) or ((Len+TOmfPublicNameElement(PublicNames[LastIncludedIndex+1]).GetLengthInFile(Is32Bit))>=RecordLengthLimit);
+      until (LastIncludedIndex>=(PublicNames.Count-1)) or
+            ((Len+TOmfPublicNameElement(PublicNames[LastIncludedIndex+1]).GetLengthInFile(Is32Bit))>=RecordLengthLimit) or
+            (TOmfPublicNameElement(PublicNames[LastIncludedIndex+1]).IsLocal<>IsLocal);
 
       { write the public names... }
       for I:=NextIndex to LastIncludedIndex do
@@ -1768,6 +1881,22 @@ implementation
 
       { update NextIndex }
       NextIndex:=LastIncludedIndex+1;
+    end;
+
+  procedure TOmfRecord_PUBDEF.MaybeGo32;
+    var
+      I: Integer;
+      PubName: TOmfPublicNameElement;
+    begin
+      for I:=0 to PublicNames.Count-1 do
+        begin
+          PubName:=TOmfPublicNameElement(PublicNames[I]);
+          if PubName.PublicOffset>$ffff then
+            begin
+              Is32Bit:=true;
+              exit;
+            end;
+        end;
     end;
 
   { TOmfExternalNameElement }
@@ -2178,6 +2307,127 @@ implementation
       NextIndex:=LastIncludedIndex+1;
     end;
 
+  { TOmfThread }
+
+  constructor TOmfThread.Create;
+    begin
+      FInitialized:=False;
+      FDatum:=-1;
+    end;
+
+  { TOmfThreads }
+
+  function TOmfThreads.GetTargetThread(Index: TOmfFixupThread): TOmfTargetThread;
+    begin
+      Result:=FTargetThreads[Index];
+    end;
+
+  function TOmfThreads.GetFrameThread(Index: TOmfFixupThread): TOmfFrameThread;
+    begin
+      Result:=FFrameThreads[Index];
+    end;
+
+  constructor TOmfThreads.Create;
+    var
+      t: TOmfFixupThread;
+    begin
+      for t in TOmfFixupThread do
+        begin
+          FTargetThreads[t]:=TOmfTargetThread.Create;
+          FFrameThreads[t]:=TOmfFrameThread.Create;
+        end;
+    end;
+
+  destructor TOmfThreads.Destroy;
+    var
+      t: TOmfFixupThread;
+    begin
+      for t in TOmfFixupThread do
+        begin
+          FTargetThreads[t].Free;
+          FFrameThreads[t].Free;
+        end;
+      inherited Destroy;
+    end;
+
+  { TOmfSubRecord_THREAD }
+
+  function TOmfSubRecord_THREAD.ReadAt(RawRecord: TOmfRawRecord; Offset: Integer): Integer;
+    var
+      B, Method: Byte;
+    begin
+      if Offset>=RawRecord.RecordLength then
+        internalerror(2018052901);
+      B:=RawRecord.RawData[Offset];
+      Inc(Offset);
+      if (B and $A0)<>0 then
+        internalerror(2018052902);
+      ThreadNumber:=TOmfFixupThread(B and 3);
+      Method:=(B shr 2) and 7;
+      if (B and $40)<>0 then
+        begin
+          ThreadType:=ttFrame;
+          FrameMethod:=TOmfFixupFrameMethod(Method);
+        end
+      else
+        begin
+          ThreadType:=ttTarget;
+          if Method>3 then
+            internalerror(2018052903);
+          TargetMethod:=TOmfFixupTargetMethod(Method);
+        end;
+      if Method<=3 then
+        Offset:=RawRecord.ReadIndexedRef(Offset,FDatum)
+      else
+        Datum:=0;
+      Result:=Offset;
+    end;
+
+  function TOmfSubRecord_THREAD.WriteAt(RawRecord: TOmfRawRecord; Offset: Integer): Integer;
+    var
+      B, Method: Byte;
+    begin
+      if ThreadType=ttFrame then
+        begin
+          B:=$40;
+          Method:=Byte(FrameMethod) and 7;
+        end
+      else
+        begin
+          B:=0;
+          Method:=Byte(TargetMethod) and 7;
+          if Method>3 then
+            internalerror(2018052904);
+        end;
+      Inc(B,Byte(ThreadNumber) and 3);
+      Inc(B,Method shl 2);
+      RawRecord.RawData[Offset]:=B;
+      Inc(Offset);
+      if Method<=3 then
+        Offset:=RawRecord.WriteIndexedRef(Offset,Datum);
+      Result:=Offset;
+    end;
+
+  procedure TOmfSubRecord_THREAD.ApplyTo(AThreads: TOmfThreads);
+    begin
+      case ThreadType of
+        ttFrame:
+          begin
+            AThreads.FrameThread[ThreadNumber].Datum:=Datum;
+            AThreads.FrameThread[ThreadNumber].FrameMethod:=FrameMethod;
+            AThreads.FrameThread[ThreadNumber].Initialized:=True;
+          end;
+        ttTarget:
+          begin
+            AThreads.TargetThread[ThreadNumber].Datum:=Datum;
+            AThreads.TargetThread[ThreadNumber].TargetMethod:=TargetMethod;
+            AThreads.TargetThread[ThreadNumber].Initialized:=True;
+          end;
+        else
+          internalerror(2018053001);
+      end;
+    end;
+
   { TOmfSubRecord_FIXUP }
 
   function TOmfSubRecord_FIXUP.GetDataRecordOffset: Integer;
@@ -2284,7 +2534,7 @@ implementation
       FixData: Byte;
     begin
       if (DataRecordOffset<0) or (DataRecordOffset>1023) then
-        internalerror(2015040501);
+        internalerror(2015040505);
       Locat:=$8000+(Ord(Mode) shl 14)+(Ord(LocationType) shl 10)+DataRecordOffset;
       { unlike other fields in the OMF format, this one is big endian }
       RawRecord.RawData[Offset]:=Byte(Locat shr 8);
@@ -2331,6 +2581,28 @@ implementation
       Result:=Offset;
     end;
 
+  procedure TOmfSubRecord_FIXUP.ResolveByThread(AThreads: TOmfThreads);
+    begin
+      if TargetDeterminedByThread then
+        begin
+          if not AThreads.TargetThread[TargetThread].Initialized then
+            internalerror(2018053002);
+          TargetDatum:=AThreads.TargetThread[TargetThread].Datum;
+          TargetMethod:=AThreads.TargetThread[TargetThread].TargetMethod;
+          if not TargetThreadDisplacementPresent then
+            Inc(FTargetMethod,4);
+          TargetThreadDisplacementPresent:=False;
+          TargetDeterminedByThread:=False;
+        end;
+      if FrameDeterminedByThread then
+        begin
+          if not AThreads.FrameThread[FrameThread].Initialized then
+            internalerror(2018053003);
+          FrameDatum:=AThreads.FrameThread[FrameThread].Datum;
+          FrameMethod:=AThreads.FrameThread[FrameThread].FrameMethod;
+          FrameDeterminedByThread:=False;
+        end;
+    end;
 
   { TOmfRecord_LIBHEAD }
 
@@ -2571,7 +2843,7 @@ implementation
         sec_idata2,sec_idata4,sec_idata5,sec_idata6,sec_idata7,sec_pdata:
           result:=4;
         sec_debug_frame,sec_debug_info,sec_debug_line,sec_debug_abbrev,sec_debug_aranges,sec_debug_ranges:
-          result:=4;
+          result:=1;
         sec_stack,
         sec_heap:
           result:=16;
@@ -2600,6 +2872,35 @@ implementation
       end;
 {$else i8086}
       result:=false;
+{$endif i8086}
+    end;
+
+  function omf_section_primary_group(atype: TAsmSectiontype;const aname:string): string;
+    begin
+{$ifdef i8086}
+      if section_belongs_to_dgroup(atype) then
+        result:='DGROUP'
+      else if create_smartlink_sections and (aname<>'') then
+        begin
+          case omf_segclass(atype) of
+            'CODE':
+              if current_settings.x86memorymodel in x86_far_code_models then
+                begin
+                  if cs_huge_code in current_settings.moduleswitches then
+                    result:=''
+                  else
+                    result:='CGROUP_'+current_module.modulename^;
+                end
+              else
+                result:='CGROUP';
+            else
+              result:='';
+          end;
+        end
+      else
+        result:='';
+{$else i8086}
+      result:='';
 {$endif i8086}
     end;
 
