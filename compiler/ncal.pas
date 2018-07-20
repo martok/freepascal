@@ -313,7 +313,7 @@ implementation
       verbose,globals,fmodule,
       aasmbase,aasmdata,
       symconst,defutil,defcmp,compinnr,
-      htypechk,pass_1,
+      htypechk,pass_1,optconstprop,
       ncnv,nflw,nld,ninl,nadd,ncon,nmem,nset,nobjc,
       pgenutil,
       ngenutil,objcutil,aasmcnst,
@@ -4608,6 +4608,10 @@ implementation
 
       function needtemp: boolean;
         begin
+          { Const values never get a temp so simplify works better }
+          if is_constnode(para.left) then
+            Exit(False);
+
           { We need a temp if the passed value will not be in memory, while
             the parameter inside the routine must be in memory }
           if (tparavarsym(para.parasym).varregable in [vr_none,vr_addr]) and
@@ -4988,6 +4992,7 @@ implementation
         foreachnodestatic(pm_postprocess,body,@removeusercodeflag,nil);
         foreachnodestatic(pm_postprocess,body,@importglobalsyms,nil);
         foreachnode(pm_preprocess,body,@replaceparaload,@fileinfo);
+        do_optconstpropagate(body);
 
         { Concat the body and finalization parts }
         addstatement(inlineinitstatement,body);

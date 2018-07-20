@@ -215,11 +215,21 @@ unit optconstprop;
             else if might_have_sideeffects(n) then
               exit(false);
 
-            replaceBasicAssign(tunarynode(n).left, arg, tree_modified);
-            result:=false;
+            result:= replaceBasicAssign(tunarynode(n).left, arg, tree_modified);
           end
         else if n.nodetype=calln then
-          exit(false)
+          begin
+            { if any parameter may change the value, stop propagating }
+            st2:= tcallnode(n).parameters;
+            while assigned(st2) do
+              begin
+                if tcallparanode(st2).parasym.varspez in [vs_var,vs_out] then
+                  exit(false);
+                st2:= tcallparanode(st2).right;
+              end;
+            { otherwise, process parameters }
+            result:=replaceBasicAssign(tbinarynode(n).left, arg, tree_modified);
+          end
         else if n.InheritsFrom(tbinarynode) then
           begin
             result:=replaceBasicAssign(tbinarynode(n).left, arg, tree_modified);
@@ -294,7 +304,8 @@ unit optconstprop;
                         is_constboolnode(a.right) or
                         is_constcharnode(a.right) or
                         is_constenumnode(a.right) or
-                        is_conststringnode(a.right)) then
+                        is_conststringnode(a.right) or
+                        is_constrealnode(a.right)) then
                       begin
                         st2:=tstatementnode(tstatementnode(st).right);
                         old:=@tstatementnode(st).right;
