@@ -599,6 +599,16 @@ implementation
               statement_syssym:=p1;
             end;
 
+          in_constexpr_x :
+            begin
+              consume(_LKLAMMER);
+              in_args:=true;
+              p1:=comp_expr([]);
+              p2:=geninlinenode(l, false, p1);
+              consume(_RKLAMMER);
+              statement_syssym:=p2;
+            end;
+
 {$ifdef i8086}
           in_faraddr_x :
             begin

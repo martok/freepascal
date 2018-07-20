@@ -2166,6 +2166,7 @@ implementation
         hp        : tnode;
         vl,vl2    : TConstExprInt;
         vr        : bestreal;
+        oldblocktype: tblock_type;
 
       begin { simplify }
          result:=nil;
@@ -2397,6 +2398,26 @@ implementation
                             sinttype,true);
                       end;
                   end;
+                end;
+              in_constexpr_x:
+                begin
+                  hp:= left.getcopy;
+                  { process as if declared in a const section to allow a few more constness assumptions }
+                  oldblocktype:= block_type;
+                  block_type:= bt_const;
+                  { pre-simplify to avoid expanding unneccessary nodes }
+                  doinlinesimplify(hp);
+                  firstpass(hp);
+                  block_type:= oldblocktype;
+                  if not is_constnode(hp) then
+                    { it is not possible to transform the argument into a const
+                      i.e. argument may contain calls, references to data, etc.
+                    }
+                    CGMessage(parser_e_illegal_expression);
+                  { type should remain correct unless something went wrong in typecheck }
+                  if not equal_defs(resultdef, hp.resultdef) then
+                    internalerror(2018072001);
+                  result:= hp;
                 end;
               in_assigned_x:
                 begin
@@ -3042,6 +3063,11 @@ implementation
                     CGMessage(type_e_no_type_info);
                   set_varstate(left,vs_read,[vsf_must_be_valid]);
                   resultdef:=typekindtype;
+                end;
+
+              in_constexpr_x:
+                begin
+                  resultdef:= left.resultdef;
                 end;
 
               in_assigned_x:

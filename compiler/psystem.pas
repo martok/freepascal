@@ -110,6 +110,7 @@ implementation
         systemunit.insert(csyssym.create('Insert',in_insert_x_y_z));
         systemunit.insert(csyssym.create('Delete',in_delete_x_y_z));
         systemunit.insert(csyssym.create('GetTypeKind',in_gettypekind_x));
+        systemunit.insert(csyssym.create('ConstExpr',in_constexpr_x));
         systemunit.insert(cconstsym.create_ord('False',constord,0,pasbool8type));
         systemunit.insert(cconstsym.create_ord('True',constord,1,pasbool8type));
       end;
