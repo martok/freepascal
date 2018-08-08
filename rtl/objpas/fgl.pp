@@ -96,9 +96,9 @@ type
 
 const
 {$ifdef cpu16}
-  MaxGListSize = {MaxInt div} 1024;
+  MaxGListSize = {MaxInt div} 1024 deprecated;
 {$else cpu16}
-  MaxGListSize = MaxInt div 1024;
+  MaxGListSize = MaxInt div 1024 deprecated;
 {$endif cpu16}
 
 type
@@ -117,9 +117,9 @@ type
   private
     type
       TCompareFunc = function(const Item1, Item2: T): Integer;
-      TTypeList = array[0..MaxGListSize] of T;
-      PTypeList = ^TTypeList;
       PT = ^T;
+      TTypeList = PT;
+      PTypeList = ^TTypeList;
   {$ifndef OldSyntax}protected var{$else}var protected{$endif}
       FOnCompare: TCompareFunc;
     procedure CopyItem(Src, Dest: Pointer); override;
@@ -157,9 +157,9 @@ type
   private
     type
       TCompareFunc = function(const Item1, Item2: T): Integer;
-      TTypeList = array[0..MaxGListSize] of T;
-      PTypeList = ^TTypeList;
       PT = ^T;
+      TTypeList = PT;
+      PTypeList = ^TTypeList;
       TFPGListEnumeratorSpec = specialize TFPGListEnumerator<T>;
   {$ifndef OldSyntax}protected var{$else}var protected{$endif}
       FOnCompare: TCompareFunc;
@@ -198,9 +198,9 @@ type
   private
     type
       TCompareFunc = function(const Item1, Item2: T): Integer;
-      TTypeList = array[0..MaxGListSize] of T;
-      PTypeList = ^TTypeList;
       PT = ^T;
+      TTypeList = PT;
+      PTypeList = ^TTypeList;
       TFPGListEnumeratorSpec = specialize TFPGListEnumerator<T>;
   {$ifndef OldSyntax}protected var{$else}var protected{$endif}
       FOnCompare: TCompareFunc;

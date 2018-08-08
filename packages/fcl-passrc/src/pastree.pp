@@ -19,6 +19,10 @@
 
 unit PasTree;
 
+{$if defined(debugrefcount) or defined(VerbosePasTreeMem) or defined(VerbosePasResolver)}
+  {$define EnablePasTreeGlobalRefCount}
+{$endif}
+
 interface
 
 uses Classes;
@@ -131,6 +135,9 @@ type
     FParent: TPasElement;
     FHints : TPasMemberHints;
     FHintMessage : String;
+    {$ifdef EnablePasTreeGlobalRefCount}
+    class var FGlobalRefCount: int64;
+    {$endif}
   protected
     procedure ProcessHints(const ASemiColonPrefix: boolean; var AResult: string); virtual;
     procedure SetParent(const AValue: TPasElement); virtual;
@@ -139,11 +146,17 @@ type
     SourceLinenumber: Integer;
     SourceEndLinenumber: Integer;
     Visibility: TPasMemberVisibility;
+    {$IFDEF CheckPasTreeRefCount}
   public
+    RefIds: TStringList;
+    NextRefEl, PrevRefEl: TPasElement;
+    class var FirstRefEl, LastRefEl: TPasElement;
+    procedure ChangeRefId(const OldId, NewId: string);
+    {$ENDIF}
     constructor Create(const AName: string; AParent: TPasElement); virtual;
     destructor Destroy; override;
-    procedure AddRef;
-    procedure Release;
+    procedure AddRef{$IFDEF CheckPasTreeRefCount}(const aId: string){$ENDIF};
+    procedure Release{$IFDEF CheckPasTreeRefCount}(const aId: string){$ENDIF};
     procedure ForEachCall(const aMethodCall: TOnForEachPasElement;
       const Arg: Pointer); virtual;
     procedure ForEachChildCall(const aMethodCall: TOnForEachPasElement;
@@ -165,6 +178,9 @@ type
     Property Hints : TPasMemberHints Read FHints Write FHints;
     Property HintMessage : String Read FHintMessage Write FHintMessage;
     Property DocComment : String Read FDocComment Write FDocComment;
+    {$ifdef EnablePasTreeGlobalRefCount}
+    class property GlobalRefCount: int64 read FGlobalRefCount write FGlobalRefCount;
+    {$endif}
   end;
 
   TPasExprKind = (pekIdent, pekNumber, pekString, pekSet, pekNil, pekBoolConst,
@@ -351,6 +367,7 @@ type
     function ElementTypeName: string; override;
     procedure ForEachCall(const aMethodCall: TOnForEachPasElement;
       const Arg: Pointer); override;
+    procedure ReleaseUsedUnits;
   public
     UsesList: TFPList; // kept for compatibility, see TPasUsesUnit.Module
     UsesClause: TPasUsesClause;
@@ -399,6 +416,7 @@ type
     function GetDeclaration(full : boolean) : string; override;
     procedure ForEachCall(const aMethodCall: TOnForEachPasElement;
       const Arg: Pointer); override;
+    procedure ReleaseUsedUnits; virtual;
   public
     GlobalDirectivesSection: TPasImplCommandBase; // not used by pparser
     InterfaceSection: TInterfaceSection;
@@ -423,6 +441,7 @@ type
     function ElementTypeName: string; override;
     procedure ForEachCall(const aMethodCall: TOnForEachPasElement;
       const Arg: Pointer); override;
+    procedure ReleaseUsedUnits; override;
   Public
     ProgramSection: TProgramSection;
     InputFile,OutPutFile : String;
@@ -437,6 +456,7 @@ type
     function ElementTypeName: string; override;
     procedure ForEachCall(const aMethodCall: TOnForEachPasElement;
       const Arg: Pointer); override;
+    procedure ReleaseUsedUnits; override;
   Public
     LibrarySection: TLibrarySection;
     InputFile,OutPutFile : String;
@@ -525,7 +545,7 @@ type
     function GetDeclaration(full: boolean) : string; override;
   end;
 
-  { TPasSpecializeType }
+  { TPasSpecializeType DestType<Params> }
 
   TPasSpecializeType = class(TPasAliasType)
   public
@@ -549,7 +569,7 @@ type
       const Arg: Pointer); override;
     procedure ClearTypeReferences(aType: TPasElement); override;
   public
-    DestType: TPasType;
+    DestType: TPasType; // TPasSpecializeType
   end;
 
   { TInlineSpecializeExpr - A<B,C> }
@@ -1596,26 +1616,34 @@ const
   VariableModifierNames : Array[TVariableModifier] of string
      = ('cvar', 'external', 'public', 'export', 'class', 'static');
 
-procedure ReleaseAndNil(var El: TPasElement); overload;
+procedure ReleaseAndNil(var El: TPasElement {$IFDEF CheckPasTreeRefCount}; const Id: string{$ENDIF}); overload;
 
 {$IFDEF HasPTDumpStack}
-function PTDumpStack: string;
+procedure PTDumpStack;
+function GetPTDumpStack: string;
 {$ENDIF}
 
 implementation
 
 uses SysUtils;
 
-procedure ReleaseAndNil(var El: TPasElement);
+procedure ReleaseAndNil(var El: TPasElement {$IFDEF CheckPasTreeRefCount}; const Id: string{$ENDIF});
 begin
   if El=nil then exit;
   {$IFDEF VerbosePasTreeMem}writeln('ReleaseAndNil ',El.Name,' ',El.ClassName);{$ENDIF}
-  El.Release;
+  El.Release{$IFDEF CheckPasTreeRefCount}(Id){$ENDIF};
   El:=nil;
 end;
 
 {$IFDEF HasPTDumpStack}
-function PTDumpStack: string;
+procedure PTDumpStack;
+begin
+  {AllowWriteln}
+  writeln(GetPTDumpStack);
+  {AllowWriteln-}
+end;
+
+function GetPTDumpStack: string;
 var
   bp: Pointer;
   addr: Pointer;
@@ -1628,9 +1656,6 @@ begin
   while bp<>nil do begin
     addr:=get_caller_addr(bp);
     CurAddress:=BackTraceStrFunc(addr);
-    {AllowWriteln}
-    writeln();
-    {AllowWriteln-}
     Result:=Result+CurAddress+LineEnding;
     oldbp:=bp;
     bp:=get_caller_frame(bp);
@@ -1644,9 +1669,9 @@ end;
 
 destructor TPasMethodResolution.Destroy;
 begin
-  ReleaseAndNil(TPasElement(InterfaceName));
-  ReleaseAndNil(TPasElement(InterfaceProc));
-  ReleaseAndNil(TPasElement(ImplementationProc));
+  ReleaseAndNil(TPasElement(InterfaceName){$IFDEF CheckPasTreeRefCount},'TPasMethodResolution.InterfaceName'{$ENDIF});
+  ReleaseAndNil(TPasElement(InterfaceProc){$IFDEF CheckPasTreeRefCount},'TPasMethodResolution.InterfaceProc'{$ENDIF});
+  ReleaseAndNil(TPasElement(ImplementationProc){$IFDEF CheckPasTreeRefCount},'TPasMethodResolution.ImplementationProc'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -1662,7 +1687,7 @@ end;
 
 destructor TInlineTypeExpr.Destroy;
 begin
-  ReleaseAndNil(TPasElement(DestType));
+  ReleaseAndNil(TPasElement(DestType){$IFDEF CheckPasTreeRefCount},'TInlineTypeExpr.DestType'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -1685,7 +1710,7 @@ end;
 procedure TInlineTypeExpr.ClearTypeReferences(aType: TPasElement);
 begin
   if DestType=aType then
-    ReleaseAndNil(TPasElement(DestType));
+    ReleaseAndNil(TPasElement(DestType){$IFDEF CheckPasTreeRefCount},'TInlineTypeExpr.DestType'{$ENDIF});
 end;
 
 { TPasSpecializeType }
@@ -1702,7 +1727,7 @@ var
   i: Integer;
 begin
   for i:=0 to Params.Count-1 do
-    TPasElement(Params[i]).Release;
+    TPasElement(Params[i]).Release{$IFDEF CheckPasTreeRefCount}('TPasSpecializeType.Params'){$ENDIF};
   FreeAndNil(Params);
   inherited Destroy;
 end;
@@ -1767,9 +1792,9 @@ end;
 
 destructor TPasUsesUnit.Destroy;
 begin
-  ReleaseAndNil(TPasElement(Expr));
-  ReleaseAndNil(TPasElement(InFilename));
-  ReleaseAndNil(TPasElement(Module));
+  ReleaseAndNil(TPasElement(Expr){$IFDEF CheckPasTreeRefCount},'TPasUsesUnit.Expr'{$ENDIF});
+  ReleaseAndNil(TPasElement(InFilename){$IFDEF CheckPasTreeRefCount},'TPasUsesUnit.InFilename'{$ENDIF});
+  ReleaseAndNil(TPasElement(Module){$IFDEF CheckPasTreeRefCount},'TPasUsesUnit.Module'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -1836,9 +1861,9 @@ end;
 
 destructor TPasImplRaise.Destroy;
 begin
-  ReleaseAndNil(TPasElement(ExceptObject));
-  ReleaseAndNil(TPasElement(ExceptAddr));
-  Inherited;
+  ReleaseAndNil(TPasElement(ExceptObject){$IFDEF CheckPasTreeRefCount},'TPasImplRaise.ExceptObject'{$ENDIF});
+  ReleaseAndNil(TPasElement(ExceptAddr){$IFDEF CheckPasTreeRefCount},'TPasImplRaise.ExceptAddr'{$ENDIF});
+  inherited Destroy;
 end;
 
 procedure TPasImplRaise.ForEachCall(const aMethodCall: TOnForEachPasElement;
@@ -1853,7 +1878,7 @@ end;
 
 destructor TPasImplRepeatUntil.Destroy;
 begin
-  ReleaseAndNil(TPasElement(ConditionExpr));
+  ReleaseAndNil(TPasElement(ConditionExpr){$IFDEF CheckPasTreeRefCount},'TPasImplRepeatUntil.ConditionExpr'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -1876,7 +1901,7 @@ end;
 
 destructor TPasImplSimple.Destroy;
 begin
-  ReleaseAndNil(TPasElement(Expr));
+  ReleaseAndNil(TPasElement(Expr){$IFDEF CheckPasTreeRefCount},'TPasImplSimple.Expr'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -1891,8 +1916,8 @@ end;
 
 destructor TPasImplAssign.Destroy;
 begin
-  ReleaseAndNil(TPasElement(Left));
-  ReleaseAndNil(TPasElement(Right));
+  ReleaseAndNil(TPasElement(Left){$IFDEF CheckPasTreeRefCount},'TPasImplAssign.left'{$ENDIF});
+  ReleaseAndNil(TPasElement(Right){$IFDEF CheckPasTreeRefCount},'TPasImplAssign.right'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -1908,8 +1933,8 @@ end;
 
 destructor TPasExportSymbol.Destroy;
 begin
-  ReleaseAndNil(TPasElement(ExportName));
-  ReleaseAndNil(TPasElement(ExportIndex));
+  ReleaseAndNil(TPasElement(ExportName){$IFDEF CheckPasTreeRefCount},'TPasExportSymbol.ExportName'{$ENDIF});
+  ReleaseAndNil(TPasElement(ExportIndex){$IFDEF CheckPasTreeRefCount},'TPasExportSymbol.ExportIndex'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -1946,7 +1971,7 @@ end;
 
 destructor TPasLibrary.Destroy;
 begin
-  ReleaseAndNil(TPasElement(LibrarySection));
+  ReleaseAndNil(TPasElement(LibrarySection){$IFDEF CheckPasTreeRefCount},'TPasLibrary.LibrarySection'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -1962,12 +1987,19 @@ begin
   inherited ForEachCall(aMethodCall, Arg);
 end;
 
+procedure TPasLibrary.ReleaseUsedUnits;
+begin
+  if LibrarySection<>nil then
+    LibrarySection.ReleaseUsedUnits;
+  inherited ReleaseUsedUnits;
+end;
+
 { TPasProgram }
 
 destructor TPasProgram.Destroy;
 begin
   {$IFDEF VerbosePasTreeMem}writeln('TPasProgram.Destroy ProgramSection');{$ENDIF}
-  ReleaseAndNil(TPasElement(ProgramSection));
+  ReleaseAndNil(TPasElement(ProgramSection){$IFDEF CheckPasTreeRefCount},'TPasProgram.ProgramSection'{$ENDIF});
   {$IFDEF VerbosePasTreeMem}writeln('TPasProgram.Destroy inherited');{$ENDIF}
   inherited Destroy;
   {$IFDEF VerbosePasTreeMem}writeln('TPasProgram.Destroy END');{$ENDIF}
@@ -1983,6 +2015,13 @@ procedure TPasProgram.ForEachCall(const aMethodCall: TOnForEachPasElement;
 begin
   ForEachChildCall(aMethodCall,Arg,ProgramSection,false);
   inherited ForEachCall(aMethodCall, Arg);
+end;
+
+procedure TPasProgram.ReleaseUsedUnits;
+begin
+  if ProgramSection<>nil then
+    ProgramSection.ReleaseUsedUnits;
+  inherited ReleaseUsedUnits;
 end;
 
 { TPasUnitModule }
@@ -2074,7 +2113,7 @@ end;
 
 destructor TPasEnumValue.Destroy;
 begin
-  ReleaseAndNil(TPasElement(Value));
+  ReleaseAndNil(TPasElement(Value){$IFDEF CheckPasTreeRefCount},'TPasEnumValue.Value'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -2103,7 +2142,7 @@ end;
 procedure TPasResultElement.ClearTypeReferences(aType: TPasElement);
 begin
   if ResultType=aType then
-    ReleaseAndNil(TPasElement(ResultType));
+    ReleaseAndNil(TPasElement(ResultType){$IFDEF CheckPasTreeRefCount},'TPasResultElement.ResultType'{$ENDIF});
 end;
 
 function TPasFunctionType.ElementTypeName: string; begin Result := SPasTreeFunctionType end;
@@ -2245,11 +2284,42 @@ begin
   FParent:=AValue;
 end;
 
+{$IFDEF CheckPasTreeRefCount}
+procedure TPasElement.ChangeRefId(const OldId, NewId: string);
+var
+  i: Integer;
+begin
+  i:=RefIds.IndexOf(OldId);
+  if i<0 then
+    begin
+    {AllowWriteln}
+    writeln('ERROR: TPasElement.ChangeRefId ',Name,':',ClassName,' Old="'+OldId+'" New="'+NewId+'" Old not found');
+    writeln(RefIds.Text);
+    {AllowWriteln-}
+    raise Exception.Create('');
+    end;
+  RefIds.Delete(i);
+  RefIds.Add(NewId);
+end;
+{$ENDIF}
+
 constructor TPasElement.Create(const AName: string; AParent: TPasElement);
 begin
   inherited Create;
   FName := AName;
   FParent := AParent;
+  {$ifdef EnablePasTreeGlobalRefCount}
+  Inc(FGlobalRefCount);
+  {$endif}
+  {$IFDEF CheckPasTreeRefCount}
+  RefIds:=TStringList.Create;
+  PrevRefEl:=LastRefEl;
+  if LastRefEl<>nil then
+    LastRefEl.NextRefEl:=Self
+  else
+    FirstRefEl:=Self;
+  LastRefEl:=Self;
+  {$ENDIF}
 end;
 
 destructor TPasElement.Destroy;
@@ -2257,28 +2327,68 @@ begin
   if (FRefCount>0) and (FRefCount<high(FRefCount)) then
     begin
     {$if defined(debugrefcount) or defined(VerbosePasTreeMem)}writeln('TPasElement.Destroy ',Name,':',ClassName);{$ENDIF}
+    {$IFDEF CheckPasTreeRefCount}
+    if (FRefCount>0) and (FRefCount<high(FRefCount)) then
+      begin
+      {AllowWriteln}
+      writeln('TPasElement.Destroy ',Name,':',ClassName,' RefIds.Count=',RefIds.Count);
+      writeln(RefIds.Text);
+      {AllowWriteln-}
+      end;
+    FreeAndNil(RefIds);
+    {$ENDIF}
     raise Exception.Create('');
     end;
+  {$IFDEF CheckPasTreeRefCount}
+  FreeAndNil(RefIds);
+  // remove from global chain
+  if FirstRefEl=Self then FirstRefEl:=NextRefEl;
+  if LastRefEl=Self then LastRefEl:=PrevRefEl;
+  if PrevRefEl<>nil then
+    PrevRefEl.NextRefEl:=NextRefEl;
+  if NextRefEl<>nil then
+    NextRefEl.PrevRefEl:=PrevRefEl;
+  PrevRefEl:=nil;
+  NextRefEl:=nil;
+  {$ENDIF}
   FParent:=nil;
+  {$ifdef EnablePasTreeGlobalRefCount}
+  Dec(FGlobalRefCount);
+  {$endif}
   inherited Destroy;
 end;
 
-procedure TPasElement.AddRef;
+procedure TPasElement.AddRef{$IFDEF CheckPasTreeRefCount}(const aId: string){$ENDIF};
 begin
+  {$ifdef EnablePasTreeGlobalRefCount}
+  Inc(FGlobalRefCount);
+  {$endif}
   Inc(FRefCount);
+  {$IFDEF CheckPasTreeRefCount}
+  if SameText(aId,'CreateElement') and (RefIds.IndexOf('CreateElement')>=0) then
+    begin
+    {AllowWriteln}
+    writeln('TPasElement.AddRef ',Name,':',ClassName,' RefCount=',RefCount,' RefIds={',RefIds.Text,'}');
+    {AllowWriteln-}
+    {$IFDEF HasPTDumpStack}
+    PTDumpStack;
+    {$ENDIF}
+    Halt;
+    end;
+  RefIds.Add(aId);
+  {$ENDIF}
 end;
 
-{ $define debugrefcount}
-
-procedure TPasElement.Release;
-
+procedure TPasElement.Release{$IFDEF CheckPasTreeRefCount}(const aId: string){$ENDIF};
 {$if defined(debugrefcount) or defined(VerbosePasTreeMem)}
 Var
   Cn : String;
   {$endif}
-
+{$IFDEF CheckPasTreeRefCount}
+var i: integer;
+{$ENDIF}
 begin
-{$if defined(debugrefcount) or defined(VerbosePasTreeMem)}
+  {$if defined(debugrefcount) or defined(VerbosePasTreeMem)}
   {AllowWriteln}
   CN:=ClassName+' '+Name;
   CN:=CN+' '+IntToStr(FRefCount);
@@ -2286,7 +2396,14 @@ begin
   //  CN:=CN+' ('+Parent.ClassName+')';
   Writeln('TPasElement.Release : ',Cn);
   {AllowWriteln-}
-{$endif}
+  {$endif}
+  {$IFDEF CheckPasTreeRefCount}
+  i:=RefIds.IndexOf(aId);
+  if i<0 then
+    RefIds.Add('remove:'+aId)
+  else
+    RefIds.Delete(i);
+  {$ENDIF}
   if FRefCount = 0 then
     begin
     FRefCount:=High(FRefCount);
@@ -2303,7 +2420,12 @@ begin
     raise Exception.Create('');
     end
   else
+    begin
     Dec(FRefCount);
+    {$ifdef EnablePasTreeGlobalRefCount}
+    Dec(FGlobalRefCount);
+    {$endif}
+    end;
 {$if defined(debugrefcount) or defined(VerbosePasTreeMem)}  Writeln('TPasElement.Released : ',Cn); {$endif}
 end;
 
@@ -2460,7 +2582,7 @@ begin
     begin
     Child:=TPasElement(Declarations[i]);
     Child.Parent:=nil;
-    Child.Release;
+    Child.Release{$IFDEF CheckPasTreeRefCount}('TPasDeclarations.Childs'){$ENDIF};
     end;
   FreeAndNil(Declarations);
 
@@ -2471,16 +2593,18 @@ end;
 
 destructor TPasModule.Destroy;
 begin
+  {$IFDEF VerbosePasTreeMem}writeln('TPasModule.Destroy ReleaseUsedUnits');{$ENDIF}
+  ReleaseUsedUnits;
   {$IFDEF VerbosePasTreeMem}writeln('TPasModule.Destroy global directives');{$ENDIF}
-  ReleaseAndNil(TPasElement(GlobalDirectivesSection));
+  ReleaseAndNil(TPasElement(GlobalDirectivesSection){$IFDEF CheckPasTreeRefCount},'TPasModule.GlobalDirectivesSection'{$ENDIF});
   {$IFDEF VerbosePasTreeMem}writeln('TPasModule.Destroy interface');{$ENDIF}
-  ReleaseAndNil(TPasElement(InterfaceSection));
+  ReleaseAndNil(TPasElement(InterfaceSection){$IFDEF CheckPasTreeRefCount},'TPasModule.InterfaceSection'{$ENDIF});
   {$IFDEF VerbosePasTreeMem}writeln('TPasModule.Destroy implementation');{$ENDIF}
-  ReleaseAndNil(TPasElement(ImplementationSection));
+  ReleaseAndNil(TPasElement(ImplementationSection){$IFDEF CheckPasTreeRefCount},'TPasModule.ImplementationSection'{$ENDIF});
   {$IFDEF VerbosePasTreeMem}writeln('TPasModule.Destroy initialization');{$ENDIF}
-  ReleaseAndNil(TPasElement(InitializationSection));
+  ReleaseAndNil(TPasElement(InitializationSection){$IFDEF CheckPasTreeRefCount},'TPasModule.InitializationSection'{$ENDIF});
   {$IFDEF VerbosePasTreeMem}writeln('TPasModule.Destroy finalization');{$ENDIF}
-  ReleaseAndNil(TPasElement(FinalizationSection));
+  ReleaseAndNil(TPasElement(FinalizationSection){$IFDEF CheckPasTreeRefCount},'TPasModule.FinalizationSection'{$ENDIF});
   {$IFDEF VerbosePasTreeMem}writeln('TPasModule.Destroy inherited');{$ENDIF}
   inherited Destroy;
   {$IFDEF VerbosePasTreeMem}writeln('TPasModule.Destroy END');{$ENDIF}
@@ -2501,7 +2625,7 @@ var
   i: Integer;
 begin
   for i := 0 to Modules.Count - 1 do
-    TPasModule(Modules[i]).Release;
+    TPasModule(Modules[i]).Release{$IFDEF CheckPasTreeRefCount}('TPasPackage.Modules'){$ENDIF};
   FreeAndNil(Modules);
   inherited Destroy;
 end;
@@ -2509,11 +2633,11 @@ end;
 procedure TPasPointerType.SetParent(const AValue: TPasElement);
 begin
   if (AValue=nil) and (Parent<>nil) and (DestType<>nil)
-      and (DestType.Parent=Parent) then
+      and ((DestType.Parent=Parent) or (DestType=Self)) then
     begin
     // DestType in same type section can create a loop
     // -> break loop when type section is closed
-    DestType.Release;
+    DestType.Release{$IFDEF CheckPasTreeRefCount}('TPasPointerType.DestType'){$ENDIF};
     DestType:=nil;
     end;
   inherited SetParent(AValue);
@@ -2521,19 +2645,18 @@ end;
 
 destructor TPasPointerType.Destroy;
 begin
-  if Assigned(DestType) then
-    DestType.Release;
+  ReleaseAndNil(TPasElement(DestType){$IFDEF CheckPasTreeRefCount},'TPasPointerType.DestType'{$ENDIF});
   inherited Destroy;
 end;
 
 procedure TPasAliasType.SetParent(const AValue: TPasElement);
 begin
   if (AValue=nil) and (Parent<>nil) and (DestType<>nil)
-      and (DestType.Parent=Parent) then
+      and ((DestType.Parent=Parent) or (DestType=Self)) then
     begin
     // DestType in same type section can create a loop
     // -> break loop when type section is closed
-    DestType.Release;
+    DestType.Release{$IFDEF CheckPasTreeRefCount}('TPasAliasType.DestType'){$ENDIF};
     DestType:=nil;
     end;
   inherited SetParent(AValue);
@@ -2541,8 +2664,8 @@ end;
 
 destructor TPasAliasType.Destroy;
 begin
-  ReleaseAndNil(TPasElement(DestType));
-  ReleaseAndNil(TPasElement(Expr));
+  ReleaseAndNil(TPasElement(DestType){$IFDEF CheckPasTreeRefCount},'TPasAliasType.DestType'{$ENDIF});
+  ReleaseAndNil(TPasElement(Expr){$IFDEF CheckPasTreeRefCount},'TPasAliasType.Expr'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -2552,16 +2675,14 @@ var
   i: Integer;
 begin
   for i:=0 to length(Ranges)-1 do
-    Ranges[i].Release;
-  if Assigned(ElType) then
-    ElType.Release;
+    Ranges[i].Release{$IFDEF CheckPasTreeRefCount}('TPasArrayType.Ranges'){$ENDIF};
+  ReleaseAndNil(TPasElement(ElType){$IFDEF CheckPasTreeRefCount},'TPasArrayType.ElType'{$ENDIF});
   inherited Destroy;
 end;
 
 destructor TPasFileType.Destroy;
 begin
-  if Assigned(ElType) then
-    ElType.Release;
+  ReleaseAndNil(TPasElement(ElType){$IFDEF CheckPasTreeRefCount},'TPasFileType.ElType'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -2577,7 +2698,7 @@ var
   i: Integer;
 begin
   for i := 0 to Values.Count - 1 do
-    TPasEnumValue(Values[i]).Release;
+    TPasEnumValue(Values[i]).Release{$IFDEF CheckPasTreeRefCount}('TPasEnumType.Values'){$ENDIF};
   FreeAndNil(Values);
   inherited Destroy;
 end;
@@ -2619,10 +2740,9 @@ Var
 
 begin
   For I:=0 to Values.Count-1 do
-    TPasElement(Values[i]).Release;
+    TPasElement(Values[i]).Release{$IFDEF CheckPasTreeRefCount}('TPasVariant.Values'){$ENDIF};
   FreeAndNil(Values);
-  if Assigned(Members) then
-    ReleaseAndNil(TPasElement(Members));
+  ReleaseAndNil(TPasElement(Members){$IFDEF CheckPasTreeRefCount},'TPasVariant.Members'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -2677,20 +2797,19 @@ var
   i: Integer;
 begin
   for i := 0 to GenericTemplateTypes.Count - 1 do
-    TPasElement(GenericTemplateTypes[i]).Release;
+    TPasElement(GenericTemplateTypes[i]).Release{$IFDEF CheckPasTreeRefCount}('TPasRecordType.GenericTemplateTypes'){$ENDIF};
   FreeAndNil(GenericTemplateTypes);
 
   for i := 0 to Members.Count - 1 do
-    TPasVariable(Members[i]).Release;
+    TPasVariable(Members[i]).Release{$IFDEF CheckPasTreeRefCount}('TPasRecordType.Members'){$ENDIF};
   FreeAndNil(Members);
 
-  if Assigned(VariantEl) then
-    ReleaseAndNil(TPasElement(VariantEl));
+  ReleaseAndNil(TPasElement(VariantEl){$IFDEF CheckPasTreeRefCount},'TPasRecordType.VariantEl'{$ENDIF});
 
   if Assigned(Variants) then
   begin
     for i := 0 to Variants.Count - 1 do
-      TPasVariant(Variants[i]).Release;
+      TPasVariant(Variants[i]).Release{$IFDEF CheckPasTreeRefCount}('TPasRecordType.Variants'){$ENDIF};
     FreeAndNil(Variants);
   end;
 
@@ -2712,6 +2831,10 @@ begin
     // parent is cleared
     // -> clear all child references to this class (releasing loops)
     ForEachCall(@ClearChildReferences,nil);
+    if AncestorType=Self then
+      ReleaseAndNil(TPasElement(AncestorType){$IFDEF CheckPasTreeRefCount},'TPasClassType.AncestorType'{$ENDIF});
+    if HelperForType=Self then
+      ReleaseAndNil(TPasElement(HelperForType){$IFDEF CheckPasTreeRefCount},'TPasClassType.HelperForType'{$ENDIF});
     end;
   inherited SetParent(AValue);
 end;
@@ -2730,21 +2853,25 @@ end;
 destructor TPasClassType.Destroy;
 var
   i: Integer;
+  El: TPasElement;
 begin
   for i := 0 to Members.Count - 1 do
-    TPasElement(Members[i]).Release;
+    begin
+    El:=TPasElement(Members[i]);
+    El.Parent:=nil;
+    El.Release{$IFDEF CheckPasTreeRefCount}('TPasClassType.Members'){$ENDIF};
+    end;
   FreeAndNil(Members);
+
   for i := 0 to Interfaces.Count - 1 do
-    TPasElement(Interfaces[i]).Release;
+    TPasElement(Interfaces[i]).Release{$IFDEF CheckPasTreeRefCount}('TPasClassType.Interfaces'){$ENDIF};
   FreeAndNil(Interfaces);
-  if Assigned(AncestorType) then
-    ReleaseAndNil(TPasElement(AncestorType));
-  if Assigned(HelperForType) then
-    ReleaseAndNil(TPasElement(HelperForType));
-  ReleaseAndNil(TPasElement(GUIDExpr));
+  ReleaseAndNil(TPasElement(AncestorType){$IFDEF CheckPasTreeRefCount},'TPasClassType.AncestorType'{$ENDIF});
+  ReleaseAndNil(TPasElement(HelperForType){$IFDEF CheckPasTreeRefCount},'TPasClassType.HelperForType'{$ENDIF});
+  ReleaseAndNil(TPasElement(GUIDExpr){$IFDEF CheckPasTreeRefCount},'TPasClassType.GUIDExpr'{$ENDIF});
   FreeAndNil(Modifiers);
   for i := 0 to GenericTemplateTypes.Count - 1 do
-    TPasElement(GenericTemplateTypes[i]).Release;
+    TPasElement(GenericTemplateTypes[i]).Release{$IFDEF CheckPasTreeRefCount}('TPasClassType.GenericTemplateTypes'){$ENDIF};
   FreeAndNil(GenericTemplateTypes);
   inherited Destroy;
 end;
@@ -2793,6 +2920,7 @@ begin
     TPasElement(AList[i]).Parent:=Self;
     GenericTemplateTypes.Add(AList[i]);
     end;
+  AList.Clear;
   ObjKind:=okGeneric;
 end;
 
@@ -2877,8 +3005,8 @@ end;
 
 destructor TPasArgument.Destroy;
 begin
-  ReleaseAndNil(TPasElement(ArgType));
-  ReleaseAndNil(TPasElement(ValueExpr));
+  ReleaseAndNil(TPasElement(ArgType){$IFDEF CheckPasTreeRefCount},'TPasArgument.ArgType'{$ENDIF});
+  ReleaseAndNil(TPasElement(ValueExpr){$IFDEF CheckPasTreeRefCount},'TPasArgument.ValueExpr'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -2934,7 +3062,7 @@ var
   i: Integer;
 begin
   for i := 0 to Args.Count - 1 do
-    TPasArgument(Args[i]).Release;
+    TPasArgument(Args[i]).Release{$IFDEF CheckPasTreeRefCount}('TPasProcedureType.Args'){$ENDIF};
   FreeAndNil(Args);
   inherited Destroy;
 end;
@@ -2968,14 +3096,13 @@ end;
 destructor TPasResultElement.Destroy;
 begin
   if Assigned(ResultType) then
-    ReleaseAndNil(TPasElement(ResultType));
+    ReleaseAndNil(TPasElement(ResultType){$IFDEF CheckPasTreeRefCount},'TPasResultElement.ResultType'{$ENDIF});
   inherited Destroy;
 end;
 
-
 destructor TPasFunctionType.Destroy;
 begin
-  ReleaseAndNil(TPasElement(ResultEl));
+  ReleaseAndNil(TPasElement(ResultEl){$IFDEF CheckPasTreeRefCount},'TPasFunctionType.ResultEl'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -2988,8 +3115,8 @@ end;
 
 constructor TPasUnresolvedTypeRef.Create(const AName: string; AParent: TPasElement);
 begin
-  if AParent=nil then ;
   inherited Create(AName, nil);
+  if AParent=nil then ;
 end;
 
 
@@ -2998,11 +3125,11 @@ begin
 //  FreeAndNil(Expr);
   { Attention, in derived classes, VarType isn't necessarily set!
     (e.g. in Constants) }
-  ReleaseAndNil(TPasElement(VarType));
-  ReleaseAndNil(TPasElement(Expr));
-  ReleaseAndNil(TPasElement(LibraryName));
-  ReleaseAndNil(TPasElement(ExportName));
-  ReleaseAndNil(TPasElement(AbsoluteExpr));
+  ReleaseAndNil(TPasElement(VarType){$IFDEF CheckPasTreeRefCount},'TPasVariable.VarType'{$ENDIF});
+  ReleaseAndNil(TPasElement(Expr){$IFDEF CheckPasTreeRefCount},'TPasVariable.Expr'{$ENDIF});
+  ReleaseAndNil(TPasElement(LibraryName){$IFDEF CheckPasTreeRefCount},'TPasVariable.LibraryName'{$ENDIF});
+  ReleaseAndNil(TPasElement(ExportName){$IFDEF CheckPasTreeRefCount},'TPasVariable.ExportName'{$ENDIF});
+  ReleaseAndNil(TPasElement(AbsoluteExpr){$IFDEF CheckPasTreeRefCount},'TPasVariable.AbsoluteExpr'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -3030,17 +3157,17 @@ var
   i: Integer;
 begin
   for i := 0 to Args.Count - 1 do
-    TPasArgument(Args[i]).Release;
+    TPasArgument(Args[i]).Release{$IFDEF CheckPasTreeRefCount}('TPasProperty.Args'){$ENDIF};
   FreeAndNil(FArgs);
-  ReleaseAndNil(TPasElement(IndexExpr));
-  ReleaseAndNil(TPasElement(ReadAccessor));
-  ReleaseAndNil(TPasElement(WriteAccessor));
+  ReleaseAndNil(TPasElement(IndexExpr){$IFDEF CheckPasTreeRefCount},'TPasProperty.IndexExpr'{$ENDIF});
+  ReleaseAndNil(TPasElement(ReadAccessor){$IFDEF CheckPasTreeRefCount},'TPasProperty.ReadAccessor'{$ENDIF});
+  ReleaseAndNil(TPasElement(WriteAccessor){$IFDEF CheckPasTreeRefCount},'TPasProperty.WriteAccessor'{$ENDIF});
   for i := 0 to length(Implements) - 1 do
-    TPasExpr(Implements[i]).Release;
+    TPasExpr(Implements[i]).Release{$IFDEF CheckPasTreeRefCount}('TPasProperty.Implements'){$ENDIF};
   SetLength(Implements,0);
-  ReleaseAndNil(TPasElement(StoredAccessor));
-  ReleaseAndNil(TPasElement(DefaultExpr));
-  ReleaseAndNil(TPasElement(DispIDExpr));
+  ReleaseAndNil(TPasElement(StoredAccessor){$IFDEF CheckPasTreeRefCount},'TPasProperty.StoredAccessor'{$ENDIF});
+  ReleaseAndNil(TPasElement(DefaultExpr){$IFDEF CheckPasTreeRefCount},'TPasProperty.DefaultExpr'{$ENDIF});
+  ReleaseAndNil(TPasElement(DispIDExpr){$IFDEF CheckPasTreeRefCount},'TPasProperty.DispIDExpr'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -3056,7 +3183,7 @@ var
   i: Integer;
 begin
   for i := 0 to Overloads.Count - 1 do
-    TPasProcedure(Overloads[i]).Release;
+    TPasProcedure(Overloads[i]).Release{$IFDEF CheckPasTreeRefCount}('TPasOverloadedProc.Overloads'){$ENDIF};
   FreeAndNil(Overloads);
   inherited Destroy;
 end;
@@ -3094,13 +3221,12 @@ end;
 
 destructor TPasProcedure.Destroy;
 begin
-  if Assigned(ProcType) then
-    ProcType.Release;
-  if Assigned(Body) then
-    Body.Release;
-  ReleaseAndNil(TPasElement(PublicName));
-  ReleaseAndNil(TPasElement(LibraryExpr));
-  ReleaseAndNil(TPasElement(LibrarySymbolName));
+  ReleaseAndNil(TPasElement(ProcType){$IFDEF CheckPasTreeRefCount},'TPasProcedure.ProcType'{$ENDIF});
+  ReleaseAndNil(TPasElement(Body){$IFDEF CheckPasTreeRefCount},'TPasProcedure.Body'{$ENDIF});
+  ReleaseAndNil(TPasElement(PublicName){$IFDEF CheckPasTreeRefCount},'TPasProcedure.PublicName'{$ENDIF});
+  ReleaseAndNil(TPasElement(LibraryExpr){$IFDEF CheckPasTreeRefCount},'TPasProcedure.LibraryExpr'{$ENDIF});
+  ReleaseAndNil(TPasElement(LibrarySymbolName){$IFDEF CheckPasTreeRefCount},'TPasProcedure.LibrarySymbolName'{$ENDIF});
+  ReleaseAndNil(TPasElement(DispIDExpr){$IFDEF CheckPasTreeRefCount},'TPasProcedure.DispIDExpr'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -3119,15 +3245,13 @@ destructor TPasProcedureImpl.Destroy;
 var
   i: Integer;
 begin
-  if Assigned(Body) then
-    Body.Release;
+  ReleaseAndNil(TPasElement(Body){$IFDEF CheckPasTreeRefCount},'TPasProcedureImpl.Body'{$ENDIF});
 
   for i := 0 to Locals.Count - 1 do
-    TPasElement(Locals[i]).Release;
+    TPasElement(Locals[i]).Release{$IFDEF CheckPasTreeRefCount}('TPasProcedureImpl.Locals'){$ENDIF};
   FreeAndNil(Locals);
 
-  if Assigned(ProcType) then
-    ProcType.Release;
+  ReleaseAndNil(TPasElement(ProcType){$IFDEF CheckPasTreeRefCount},'TPasProcedureImpl.ProcType'{$ENDIF});
 
   inherited Destroy;
 end;
@@ -3164,9 +3288,9 @@ end;
 
 destructor TPasImplIfElse.Destroy;
 begin
-  ReleaseAndNil(TPasElement(ConditionExpr));
-  ReleaseAndNil(TPasElement(IfBranch));
-  ReleaseAndNil(TPasElement(ElseBranch));
+  ReleaseAndNil(TPasElement(ConditionExpr){$IFDEF CheckPasTreeRefCount},'TPasImplIfElse.ConditionExpr'{$ENDIF});
+  ReleaseAndNil(TPasElement(IfBranch){$IFDEF CheckPasTreeRefCount},'TPasImplIfElse.IfBranch'{$ENDIF});
+  ReleaseAndNil(TPasElement(ElseBranch){$IFDEF CheckPasTreeRefCount},'TPasImplIfElse.ElseBranch'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -3176,12 +3300,12 @@ begin
   if IfBranch=nil then
     begin
     IfBranch:=Element;
-    Element.AddRef;
+    Element.AddRef{$IFDEF CheckPasTreeRefCount}('TPasImplIfElse.IfBranch'){$ENDIF};
     end
   else if ElseBranch=nil then
     begin
     ElseBranch:=Element;
-    Element.AddRef;
+    Element.AddRef{$IFDEF CheckPasTreeRefCount}('TPasImplIfElse.ElseBranch'){$ENDIF};
     end
   else
     raise Exception.Create('TPasImplIfElse.AddElement if and else already set - please report this bug');
@@ -3211,11 +3335,11 @@ end;
 
 destructor TPasImplForLoop.Destroy;
 begin
-  ReleaseAndNil(TPasElement(VariableName));
-  ReleaseAndNil(TPasElement(StartExpr));
-  ReleaseAndNil(TPasElement(EndExpr));
-  ReleaseAndNil(TPasElement(Variable));
-  ReleaseAndNil(TPasElement(Body));
+  ReleaseAndNil(TPasElement(VariableName){$IFDEF CheckPasTreeRefCount},'TPasImplForLoop.VariableName'{$ENDIF});
+  ReleaseAndNil(TPasElement(StartExpr){$IFDEF CheckPasTreeRefCount},'TPasImplForLoop.StartExpr'{$ENDIF});
+  ReleaseAndNil(TPasElement(EndExpr){$IFDEF CheckPasTreeRefCount},'TPasImplForLoop.EndExpr'{$ENDIF});
+  ReleaseAndNil(TPasElement(Variable){$IFDEF CheckPasTreeRefCount},'TPasImplForLoop.Variable'{$ENDIF});
+  ReleaseAndNil(TPasElement(Body){$IFDEF CheckPasTreeRefCount},'TPasImplForLoop.Body'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -3225,7 +3349,7 @@ begin
   if Body=nil then
     begin
     Body:=Element;
-    Body.AddRef;
+    Body.AddRef{$IFDEF CheckPasTreeRefCount}('TPasImplForLoop.Body'){$ENDIF};
     end
   else
     raise Exception.Create('TPasImplForLoop.AddElement body already set - please report this bug');
@@ -3275,7 +3399,7 @@ var
   i: Integer;
 begin
   for i := 0 to Elements.Count - 1 do
-    TPasImplElement(Elements[i]).Release;
+    TPasImplElement(Elements[i]).Release{$IFDEF CheckPasTreeRefCount}('TPasImplBlock.Elements'){$ENDIF};
   FreeAndNil(Elements);
   inherited Destroy;
 end;
@@ -3387,7 +3511,7 @@ begin
   Result:=TPasImplExceptOn.Create('',Self);
   Result.VarEl:=VarEl;
   Result.TypeEl:=VarEl.VarType;
-  Result.TypeEl.AddRef;
+  Result.TypeEl.AddRef{$IFDEF CheckPasTreeRefCount}('TPasImplExceptOn.TypeEl'){$ENDIF};
   AddElement(Result);
 end;
 
@@ -3463,12 +3587,13 @@ begin
   ForEachChildCall(aMethodCall,Arg,FinalizationSection,false);
 end;
 
-{
-function TPas.GetDeclaration : string;
+procedure TPasModule.ReleaseUsedUnits;
 begin
-  Result:=Name;
+  if InterfaceSection<>nil then
+    InterfaceSection.ReleaseUsedUnits;
+  if ImplementationSection<>nil then
+    ImplementationSection.ReleaseUsedUnits;
 end;
-}
 
 function TPasResString.GetDeclaration(full: Boolean): string;
 begin
@@ -3489,8 +3614,7 @@ end;
 
 destructor TPasResString.Destroy;
 begin
-  If Assigned(Expr) then
-    Expr.Release;
+  ReleaseAndNil(TPasElement(Expr){$IFDEF CheckPasTreeRefCount},'TPasResString.Expr'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -3514,7 +3638,7 @@ end;
 procedure TPasPointerType.ClearTypeReferences(aType: TPasElement);
 begin
   if DestType=aType then
-    ReleaseAndNil(TPasElement(DestType));
+    ReleaseAndNil(TPasElement(DestType){$IFDEF CheckPasTreeRefCount},'TPasPointerType.DestType'{$ENDIF});
 end;
 
 function TPasAliasType.GetDeclaration(full: Boolean): string;
@@ -3534,7 +3658,7 @@ end;
 procedure TPasAliasType.ClearTypeReferences(aType: TPasElement);
 begin
   if DestType=aType then
-    ReleaseAndNil(TPasElement(DestType));
+    ReleaseAndNil(TPasElement(DestType){$IFDEF CheckPasTreeRefCount},'TPasAliasType.DestType'{$ENDIF});
 end;
 
 function TPasClassOfType.GetDeclaration (full : boolean) : string;
@@ -3560,7 +3684,7 @@ end;
 
 destructor TPasRangeType.Destroy;
 begin
-  ReleaseAndNil(TPasElement(RangeExpr));
+  ReleaseAndNil(TPasElement(RangeExpr){$IFDEF CheckPasTreeRefCount},'TPasRangeType.RangeExpr'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -3599,7 +3723,7 @@ end;
 
 function TPasArrayType.IsGenericArray: Boolean;
 begin
-  Result:=elType is TPasGenericTemplateType;
+  Result:=ElType is TPasGenericTemplateType;
 end;
 
 function TPasArrayType.IsPacked: Boolean;
@@ -3682,7 +3806,7 @@ end;
 
 destructor TPasSetType.Destroy;
 begin
-  ReleaseAndNil(TPasElement(EnumType));
+  ReleaseAndNil(TPasElement(EnumType){$IFDEF CheckPasTreeRefCount},'TPasSetType.EnumType'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -3877,6 +4001,7 @@ begin
     TPasElement(AList[i]).Parent:=Self;
     GenericTemplateTypes.Add(AList[i]);
     end;
+  AList.Clear;
 end;
 
 procedure TPasProcedureType.GetArguments(List : TStrings);
@@ -4003,7 +4128,7 @@ end;
 procedure TPasVariable.ClearTypeReferences(aType: TPasElement);
 begin
   if VarType=aType then
-    ReleaseAndNil(TPasElement(VarType));
+    ReleaseAndNil(TPasElement(VarType){$IFDEF CheckPasTreeRefCount},'TPasVariable.VarType'{$ENDIF});
 end;
 
 
@@ -4365,7 +4490,7 @@ end;
 procedure TPasArgument.ClearTypeReferences(aType: TPasElement);
 begin
   if ArgType=aType then
-    ReleaseAndNil(TPasElement(ArgType));
+    ReleaseAndNil(TPasElement(ArgType){$IFDEF CheckPasTreeRefCount},'TPasArgument.ArgType'{$ENDIF});
 end;
 
 function TPasArgument.Value: String;
@@ -4393,17 +4518,9 @@ begin
 end;
 
 destructor TPasSection.Destroy;
-var
-  i: Integer;
 begin
-  {$IFDEF VerbosePasTreeMem}writeln('TPasSection.Destroy UsesList');{$ENDIF}
-  for i := 0 to UsesList.Count - 1 do
-    TPasType(UsesList[i]).Release;
+  ReleaseUsedUnits;
   FreeAndNil(UsesList);
-  {$IFDEF VerbosePasTreeMem}writeln('TPasSection.Destroy UsesClause');{$ENDIF}
-  for i := 0 to length(UsesClause) - 1 do
-    UsesClause[i].Release;
-  SetLength(UsesClause,0);
 
   {$IFDEF VerbosePasTreeMem}writeln('TPasSection.Destroy inherited');{$ENDIF}
   inherited Destroy;
@@ -4438,7 +4555,7 @@ begin
   Result:=UsesUnit;
 
   UsesList.Add(aModule);
-  aModule.AddRef;
+  aModule.AddRef{$IFDEF CheckPasTreeRefCount}('TPasSection.UsesList'){$ENDIF};
 end;
 
 function TPasSection.ElementTypeName: string;
@@ -4456,6 +4573,22 @@ begin
     ForEachChildCall(aMethodCall,Arg,UsesClause[i],false);
 end;
 
+procedure TPasSection.ReleaseUsedUnits;
+var
+  i: Integer;
+begin
+  {$IFDEF VerbosePasTreeMem}writeln('TPasSection.Destroy UsesList');{$ENDIF}
+  for i := 0 to UsesList.Count - 1 do
+    TPasType(UsesList[i]).Release{$IFDEF CheckPasTreeRefCount}('TPasSection.UsesList'){$ENDIF};
+  UsesList.Clear;
+  {$IFDEF VerbosePasTreeMem}writeln('TPasSection.Destroy UsesClause');{$ENDIF}
+  for i := 0 to length(UsesClause) - 1 do
+    UsesClause[i].Release{$IFDEF CheckPasTreeRefCount}('TPasSection.UsesClause'){$ENDIF};
+  SetLength(UsesClause,0);
+
+  PendingUsedIntf:=nil; // not release
+end;
+
 { TProcedureBody }
 
 constructor TProcedureBody.Create(const AName: string; AParent: TPasElement);
@@ -4465,8 +4598,7 @@ end;
 
 destructor TProcedureBody.Destroy;
 begin
-  if Assigned(Body) then
-    Body.Release;
+  ReleaseAndNil(TPasElement(Body){$IFDEF CheckPasTreeRefCount},'TProcedureBody.Body'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -4481,8 +4613,8 @@ end;
 
 destructor TPasImplWhileDo.Destroy;
 begin
-  ReleaseAndNil(TPasElement(ConditionExpr));
-  ReleaseAndNil(TPasElement(Body));
+  ReleaseAndNil(TPasElement(ConditionExpr){$IFDEF CheckPasTreeRefCount},'TPasImplWhileDo.ConditionExpr'{$ENDIF});
+  ReleaseAndNil(TPasElement(Body){$IFDEF CheckPasTreeRefCount},'TPasImplWhileDo.Body'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -4492,7 +4624,7 @@ begin
   if Body=nil then
     begin
     Body:=Element;
-    Body.AddRef;
+    Body.AddRef{$IFDEF CheckPasTreeRefCount}('TPasImplWhileDo.Body'){$ENDIF};
     end
   else
     raise Exception.Create('TPasImplWhileDo.AddElement body already set');
@@ -4517,15 +4649,15 @@ end;
 
 destructor TPasImplCaseOf.Destroy;
 begin
-  ReleaseAndNil(TPasElement(CaseExpr));
-  ReleaseAndNil(TPasElement(ElseBranch));
+  ReleaseAndNil(TPasElement(CaseExpr){$IFDEF CheckPasTreeRefCount},'TPasImplCaseOf.CaseExpr'{$ENDIF});
+  ReleaseAndNil(TPasElement(ElseBranch){$IFDEF CheckPasTreeRefCount},'TPasImplCaseOf.ElseBranch'{$ENDIF});
   inherited Destroy;
 end;
 
 procedure TPasImplCaseOf.AddElement(Element: TPasImplElement);
 begin
   if (ElseBranch<>Nil) and (Element=ElseBranch) then
-    ElseBranch.AddRef;
+    ElseBranch.AddRef{$IFDEF CheckPasTreeRefCount}('TPasImplCaseOf.ElseBranch'){$ENDIF};
   inherited AddElement(Element);
 end;
 
@@ -4577,9 +4709,9 @@ Var
 
 begin
   For I:=0 to Expressions.Count-1 do
-    TPasExpr(Expressions[i]).Release;
+    TPasExpr(Expressions[i]).Release{$IFDEF CheckPasTreeRefCount}('TPasImplCaseStatement.CaseExpr'){$ENDIF};
   FreeAndNil(Expressions);
-  ReleaseAndNil(TPasElement(Body));
+  ReleaseAndNil(TPasElement(Body){$IFDEF CheckPasTreeRefCount},'TPasImplCaseStatement.Body'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -4589,7 +4721,7 @@ begin
   if Body=nil then
     begin
     Body:=Element;
-    Body.AddRef;
+    Body.AddRef{$IFDEF CheckPasTreeRefCount}('TPasImplCaseStatement.Body'){$ENDIF};
     end
   else
     raise Exception.Create('TPasImplCaseStatement.AddElement body already set');
@@ -4625,10 +4757,9 @@ destructor TPasImplWithDo.Destroy;
 Var
   I : Integer;
 begin
-  if Assigned(Body) then
-    Body.Release;
+  ReleaseAndNil(TPasElement(Body){$IFDEF CheckPasTreeRefCount},'TPasImplWithDo.Body'{$ENDIF});
   For I:=0 to Expressions.Count-1 do
-    TPasExpr(Expressions[i]).Release;
+    TPasExpr(Expressions[i]).Release{$IFDEF CheckPasTreeRefCount}('TPasImplWithDo.Expressions'){$ENDIF};
   FreeAndNil(Expressions);
   inherited Destroy;
 end;
@@ -4639,7 +4770,7 @@ begin
   if Body=nil then
     begin
     Body:=Element;
-    Body.AddRef;
+    Body.AddRef{$IFDEF CheckPasTreeRefCount}('TPasImplWithDo.Body'){$ENDIF};
     end
   else
     raise Exception.Create('TPasImplWithDo.AddElement body already set');
@@ -4666,10 +4797,8 @@ end;
 
 destructor TPasImplTry.Destroy;
 begin
-  if Assigned(FinallyExcept) then
-    FinallyExcept.Release;
-  if Assigned(ElseBranch) then
-    ElseBranch.Release;
+  ReleaseAndNil(TPasElement(FinallyExcept){$IFDEF CheckPasTreeRefCount},'TPasImplTry.FinallyExcept'{$ENDIF});
+  ReleaseAndNil(TPasElement(ElseBranch){$IFDEF CheckPasTreeRefCount},'TPasImplTry.ElseBranch'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -4703,9 +4832,9 @@ end;
 
 destructor TPasImplExceptOn.Destroy;
 begin
-  ReleaseAndNil(TPasElement(VarEl));
-  ReleaseAndNil(TPasElement(TypeEl));
-  ReleaseAndNil(TPasElement(Body));
+  ReleaseAndNil(TPasElement(VarEl){$IFDEF CheckPasTreeRefCount},'TPasImplExceptOn.VarEl'{$ENDIF});
+  ReleaseAndNil(TPasElement(TypeEl){$IFDEF CheckPasTreeRefCount},'TPasImplExceptOn.TypeEl'{$ENDIF});
+  ReleaseAndNil(TPasElement(Body){$IFDEF CheckPasTreeRefCount},'TPasImplExceptOn.Body'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -4715,7 +4844,7 @@ begin
   if Body=nil then
     begin
     Body:=Element;
-    Body.AddRef;
+    Body.AddRef{$IFDEF CheckPasTreeRefCount}('TPasImplExceptOn.Body'){$ENDIF};
     end;
 end;
 
@@ -4732,7 +4861,7 @@ end;
 procedure TPasImplExceptOn.ClearTypeReferences(aType: TPasElement);
 begin
   if TypeEl=aType then
-    ReleaseAndNil(TPasElement(TypeEl));
+    ReleaseAndNil(TPasElement(TypeEl){$IFDEF CheckPasTreeRefCount},'TPasImplExceptOn.TypeEl'{$ENDIF});
 end;
 
 function TPasImplExceptOn.VariableName: String;
@@ -4770,8 +4899,8 @@ end;
 
 destructor TPasExpr.Destroy;
 begin
-  ReleaseAndNil(TPasElement(Format1));
-  ReleaseAndNil(TPasElement(Format2));
+  ReleaseAndNil(TPasElement(Format1){$IFDEF CheckPasTreeRefCount},'TPasExpr.format1'{$ENDIF});
+  ReleaseAndNil(TPasElement(Format2){$IFDEF CheckPasTreeRefCount},'TPasExpr.format2'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -4828,12 +4957,13 @@ constructor TUnaryExpr.Create(AParent : TPasElement; AOperand: TPasExpr; AOpCode
 begin
   inherited Create(AParent,pekUnary, AOpCode);
   Operand:=AOperand;
+  Operand.Parent:=Self;
 end;
 
 destructor TUnaryExpr.Destroy;
 begin
-  if Assigned(Operand) then
-    Operand.Release;
+  ReleaseAndNil(TPasElement(Operand){$IFDEF CheckPasTreeRefCount},'TUnaryExpr.Operand'{$ENDIF});
+  inherited Destroy;
 end;
 
 procedure TUnaryExpr.ForEachCall(const aMethodCall: TOnForEachPasElement;
@@ -4912,10 +5042,8 @@ end;
 
 destructor TBinaryExpr.Destroy;
 begin
-  if Assigned(left) then left.Release;
-  left:=nil;
-  if Assigned(right) then right.Release;
-  right:=nil;
+  ReleaseAndNil(TPasElement(left){$IFDEF CheckPasTreeRefCount},'TBinaryExpr.left'{$ENDIF});
+  ReleaseAndNil(TPasElement(right){$IFDEF CheckPasTreeRefCount},'TBinaryExpr.right'{$ENDIF});
   inherited Destroy;
 end;
 
@@ -4972,15 +5100,16 @@ end;
 
 constructor TParamsExpr.Create(AParent : TPasElement; AKind: TPasExprKind);
 begin
-  inherited Create(AParent,AKind, eopNone)
+  inherited Create(AParent,AKind, eopNone);
 end;
 
 destructor TParamsExpr.Destroy;
 var
   i : Integer;
 begin
-  ReleaseAndNil(TPasElement(Value));
-  for i:=0 to length(Params)-1 do Params[i].Release;
+  ReleaseAndNil(TPasElement(Value){$IFDEF CheckPasTreeRefCount},'TParamsExpr.Value'{$ENDIF});
+  for i:=0 to length(Params)-1 do
+    Params[i].Release{$IFDEF CheckPasTreeRefCount}('TParamsExpr.Params'){$ENDIF};
   inherited Destroy;
 end;
 
@@ -5027,7 +5156,10 @@ var
   i : Integer;
 begin
   for i:=0 to length(Fields)-1 do
-    Fields[i].ValueExp.Release;
+    begin
+    Fields[i].NameExp.Release{$IFDEF CheckPasTreeRefCount}('TRecordValues.Fields.NameExpr'){$ENDIF};
+    Fields[i].ValueExp.Release{$IFDEF CheckPasTreeRefCount}('TRecordValues.Fields.ValueExp'){$ENDIF};
+    end;
   Fields:=nil;
   inherited Destroy;
 end;
@@ -5099,7 +5231,7 @@ end;
 
 constructor TArrayValues.Create(AParent : TPasElement);
 begin
-  inherited Create(AParent,pekListOfExp, eopNone)
+  inherited Create(AParent,pekListOfExp, eopNone);
 end;
 
 destructor TArrayValues.Destroy;
@@ -5107,7 +5239,7 @@ var
   i : Integer;
 begin
   for i:=0 to length(Values)-1 do
-    Values[i].Release;
+    Values[i].Release{$IFDEF CheckPasTreeRefCount}('TArrayValues.Values'){$ENDIF};
   Values:=nil;
   inherited Destroy;
 end;

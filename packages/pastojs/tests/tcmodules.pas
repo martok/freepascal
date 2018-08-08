@@ -78,7 +78,6 @@ type
     FStreamResolver: TStreamResolver;
     FScanner: TPascalScanner;
     FSource: string;
-    procedure SetModule(AValue: TPasModule);
   public
     destructor Destroy; override;
     function FindUnit(const AName, InFilename: String; NameExpr,
@@ -90,7 +89,7 @@ type
     property Scanner: TPascalScanner read FScanner write FScanner;
     property Parser: TTestPasParser read FParser write FParser;
     property Source: string read FSource write FSource;
-    property Module: TPasModule read FModule write SetModule;
+    property Module: TPasModule read FModule;
   end;
 
   { TCustomTestModule }
@@ -124,6 +123,9 @@ type
     FSkipTests: boolean;
     FSource: TStringList;
     FFirstPasStatement: TPasImplBlock;
+    {$IFDEF EnablePasTreeGlobalRefCount}
+    FElementRefCountAtSetup: int64;
+    {$ENDIF}
     function GetMsgCount: integer;
     function GetMsgs(Index: integer): TTestHintMessage;
     function GetResolverCount: integer;
@@ -228,6 +230,7 @@ type
     Procedure TestDottedUnitExpr;
     Procedure Test_ModeFPCFail;
     Procedure Test_ModeSwitchCBlocksFail;
+    Procedure TestUnit_UseSystem;
     Procedure TestUnit_Intf1Impl2Intf1;
 
     // vars/const
@@ -949,23 +952,17 @@ end;
 
 { TTestEnginePasResolver }
 
-procedure TTestEnginePasResolver.SetModule(AValue: TPasModule);
-begin
-  if FModule=AValue then Exit;
-  if Module<>nil then
-    Module.Release;
-  FModule:=AValue;
-  if Module<>nil then
-    Module.AddRef;
-end;
-
 destructor TTestEnginePasResolver.Destroy;
 begin
   FreeAndNil(FStreamResolver);
-  Module:=nil;
   FreeAndNil(FParser);
   FreeAndNil(FScanner);
   FreeAndNil(FStreamResolver);
+  if Module<>nil then
+    begin
+    Module.Release{$IFDEF CheckPasTreeRefCount}('CreateElement'){$ENDIF};
+    FModule:=nil;
+    end;
   inherited Destroy;
 end;
 
@@ -1139,6 +1136,16 @@ end;
 
 procedure TCustomTestModule.SetUp;
 begin
+  {$IFDEF EnablePasTreeGlobalRefCount}
+  FElementRefCountAtSetup:=TPasElement.GlobalRefCount;
+  {$ENDIF}
+
+  if FModules<>nil then
+    begin
+    writeln('TCustomTestModule.SetUp FModules<>nil');
+    Halt;
+    end;
+
   inherited SetUp;
   FSkipTests:=false;
   FSource:=TStringList.Create;
@@ -1185,11 +1192,17 @@ begin
 end;
 
 procedure TCustomTestModule.TearDown;
+{$IFDEF CheckPasTreeRefCount}
+var
+  El: TPasElement;
+{$ENDIF}
+var
+  i: Integer;
+  CurModule: TPasModule;
 begin
   FHintMsgs.Clear;
   FHintMsgsGood.Clear;
   FSkipTests:=false;
-  FJSModule:=nil;
   FJSRegModuleCall:=nil;
   FJSModuleCallArgs:=nil;
   FJSImplentationUses:=nil;
@@ -1200,20 +1213,49 @@ begin
   FreeAndNil(FJSModule);
   FreeAndNil(FConverter);
   Engine.Clear;
-  if Assigned(FModule) then
-    begin
-    FModule.Release;
-    FModule:=nil;
-    end;
   FreeAndNil(FSource);
   FreeAndNil(FFileResolver);
   if FModules<>nil then
     begin
+    for i:=0 to FModules.Count-1 do
+      begin
+      CurModule:=TTestEnginePasResolver(FModules[i]).Module;
+      if CurModule=nil then continue;
+      //writeln('TCustomTestModule.TearDown ReleaseUsedUnits ',CurModule.Name,' ',CurModule.RefCount,' ',CurModule.RefIds.Text);
+      CurModule.ReleaseUsedUnits;
+      end;
+    if FModule<>nil then
+      FModule.ReleaseUsedUnits;
+    for i:=0 to FModules.Count-1 do
+      begin
+      CurModule:=TTestEnginePasResolver(FModules[i]).Module;
+      if CurModule=nil then continue;
+      //writeln('TCustomTestModule.TearDown UsesReleased ',CurModule.Name,' ',CurModule.RefCount,' ',CurModule.RefIds.Text);
+      end;
     FreeAndNil(FModules);
+    ReleaseAndNil(TPasElement(FModule){$IFDEF CheckPasTreeRefCount},'CreateElement'{$ENDIF});
     FEngine:=nil;
     end;
 
   inherited TearDown;
+  {$IFDEF EnablePasTreeGlobalRefCount}
+  if FElementRefCountAtSetup<>TPasElement.GlobalRefCount then
+    begin
+    writeln('TCustomTestModule.TearDown GlobalRefCount Was='+IntToStr(FElementRefCountAtSetup)+' Now='+IntToStr(TPasElement.GlobalRefCount));
+    {$IFDEF CheckPasTreeRefCount}
+    El:=TPasElement.FirstRefEl;
+    while El<>nil do
+      begin
+      writeln('  ',GetObjName(El),' RefIds.Count=',El.RefIds.Count,':');
+      for i:=0 to El.RefIds.Count-1 do
+        writeln('    ',El.RefIds[i]);
+      El:=El.NextRefEl;
+      end;
+    {$ENDIF}
+    Halt;
+    Fail('TCustomTestModule.TearDown Was='+IntToStr(FElementRefCountAtSetup)+' Now='+IntToStr(TPasElement.GlobalRefCount));
+    end;
+  {$ENDIF}
 end;
 
 procedure TCustomTestModule.Add(Line: string);
@@ -1293,7 +1335,7 @@ begin
   end;
   if SkipTests then exit;
 
-  AssertNotNull('Module resulted in Module',FModule);
+  AssertNotNull('Module resulted in Module',Module);
   AssertEquals('modulename',lowercase(ChangeFileExt(FFileName,'')),lowercase(Module.Name));
   TAssert.AssertSame('Has resolver',Engine,Parser.Engine);
 end;
@@ -1668,6 +1710,7 @@ begin
   writeln('CheckUnit '+Filename+' converting ...');
   {$ENDIF}
   aConverter:=CreateConverter;
+  aJSModule:=nil;
   try
     try
       aJSModule:=aConverter.ConvertPasElement(aResolver.Module,aResolver) as TJSSourceElements;
@@ -1684,6 +1727,7 @@ begin
     {$ENDIF}
     CheckDiff('Converted unit: "'+ChangeFileExt(Filename,'.js')+'"',ExpectedSrc,ActualSrc);
   finally
+    aJSModule.Free;
     aConverter.Free;
   end;
 end;
@@ -2157,6 +2201,22 @@ begin
   Add('begin');
   SetExpectedScannerError('Invalid mode switch: "cblocks-"',nErrInvalidModeSwitch);
   ConvertProgram;
+end;
+
+procedure TTestModule.TestUnit_UseSystem;
+begin
+  StartUnit(true);
+  Add([
+  'interface',
+  'var i: integer;',
+  'implementation']);
+  ConvertUnit;
+  CheckSource('TestUnit_UseSystem',
+    LinesToStr([
+    'this.i = 0;',
+    '']),
+    LinesToStr([
+    '']) );
 end;
 
 procedure TTestModule.TestUnit_Intf1Impl2Intf1;
@@ -8988,22 +9048,25 @@ end;
 procedure TTestModule.TestClass_TObjectDefaultConstructor;
 begin
   StartProgram(false);
-  Add('type');
-  Add('  TObject = class');
-  Add('  public');
-  Add('    constructor Create;');
-  Add('    destructor Destroy;');
-  Add('  end;');
-  Add('  TBird = TObject;');
-  Add('constructor tobject.create;');
-  Add('begin end;');
-  Add('destructor tobject.destroy;');
-  Add('begin end;');
-  Add('var Obj: tobject;');
-  Add('begin');
-  Add('  obj:=tobject.create;');
-  Add('  obj:=tbird.create;');
-  Add('  obj.destroy;');
+  Add(['type',
+  '  TObject = class',
+  '  public',
+  '    constructor Create;',
+  '    destructor Destroy;',
+  '  end;',
+  '  TBird = TObject;',
+  'constructor tobject.create;',
+  'begin end;',
+  'destructor tobject.destroy;',
+  'begin end;',
+  'var Obj: tobject;',
+  'begin',
+  '  obj:=tobject.create;',
+  '  obj:=tobject.create();',
+  '  obj:=tbird.create;',
+  '  obj:=tbird.create();',
+  '  obj.destroy;',
+  '']);
   ConvertProgram;
   CheckSource('TestClass_TObjectDefaultConstructor',
     LinesToStr([ // statements
@@ -9020,6 +9083,8 @@ begin
     'this.Obj = null;'
     ]),
     LinesToStr([ // $mod.$main
+    '$mod.Obj = $mod.TObject.$create("Create");',
+    '$mod.Obj = $mod.TObject.$create("Create");',
     '$mod.Obj = $mod.TObject.$create("Create");',
     '$mod.Obj = $mod.TObject.$create("Create");',
     '$mod.Obj.$destroy("Destroy");',

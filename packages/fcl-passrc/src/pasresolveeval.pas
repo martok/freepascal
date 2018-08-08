@@ -3573,6 +3573,7 @@ begin
           sRangeCheckInSetConstructor,[],El);
         end;
       Result.Add(RangeStart,RangeEnd);
+      ReleaseEvalValue(Value);
       end;
     ok:=OnlyConstElements;
   finally
@@ -4927,10 +4928,10 @@ procedure TResolveData.SetElement(AValue: TPasElement);
 begin
   if FElement=AValue then Exit;
   if Element<>nil then
-    Element.Release;
+    Element.Release{$IFDEF CheckPasTreeRefCount}(ClassName+'.SetElement'){$ENDIF};
   FElement:=AValue;
   if Element<>nil then
-    Element.AddRef;
+    Element.AddRef{$IFDEF CheckPasTreeRefCount}(ClassName+'.SetElement'){$ENDIF};
 end;
 
 constructor TResolveData.Create;

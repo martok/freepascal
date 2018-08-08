@@ -65,6 +65,7 @@ type
   TPDFPaperType = (ptCustom, ptA4, ptA5, ptLetter, ptLegal, ptExecutive, ptComm10, ptMonarch, ptDL, ptC5, ptB5);
   TPDFPaperOrientation = (ppoPortrait,ppoLandscape);
   TPDFPenStyle = (ppsSolid,ppsDash,ppsDot,ppsDashDot,ppsDashDotDot);
+  TPDFLineCapStyle = (plcsButtCap, plcsRoundCap, plcsProjectingSquareCap);
   TPDFPageLayout = (lSingle, lTwo, lContinuous);
   TPDFUnitOfMeasure = (uomInches, uomMillimeters, uomCentimeters, uomPixels);
 
@@ -143,6 +144,7 @@ type
   TPDFDocumentObject = Class(TPDFObject)
   Private
     FDocument : TPDFDocument;
+    FLineCapStyle: TPDFLineCapStyle;
   Public
     Constructor Create(Const ADocument : TPDFDocument); override; overload;
     Procedure SetWidth(AWidth : TPDFFloat; AStream : TStream);
@@ -270,6 +272,17 @@ type
     property    Value: AnsiString read FValue;
   end;
 
+  { TPDFRawHexString }
+
+  TPDFRawHexString = class(TPDFDocumentObject)
+  private
+    FValue: String;
+  protected
+    procedure Write(const AStream: TStream); override;
+  public
+    constructor Create(Const ADocument : TPDFDocument; const AValue: String); overload;
+    property    Value: String read FValue;
+  end;
 
   TPDFUTF8String = class(TPDFAbstractString)
   private
@@ -953,6 +966,7 @@ type
     FCatalogue: integer;
     FCurrentColor: string;
     FCurrentWidth: string;
+    FLineCapStyle: TPDFLineCapStyle;
     FDefaultOrientation: TPDFPaperOrientation;
     FDefaultPaperType: TPDFPaperType;
     FFontDirectory: string;
@@ -1003,6 +1017,7 @@ type
     function CreateContentsEntry(const APageNum: integer): integer;virtual;
     function CreateCatalogEntry: integer;virtual;
     procedure CreateInfoEntry;virtual;
+    procedure CreateTrailerID;virtual;
     procedure CreatePreferencesEntry;virtual;
     function CreatePagesEntry(Parent: integer): integer;virtual;
     function CreatePageEntry(Parent, PageNum: integer): integer;virtual;
@@ -1070,6 +1085,7 @@ type
     Property FontDirectory: string Read FFontDirectory Write FFontDirectory;
     Property Sections : TPDFSectionList Read FSections;
     Property ObjectCount : Integer Read FObjectCount;
+    Property LineCapStyle: TPDFLineCapStyle Read FLineCapStyle Write FLineCapStyle;
   Published
     Property Options : TPDFOptions Read FOptions Write FOPtions;
     Property LineStyles : TPDFLineStyleDefs Read FLineStyleDefs Write SetLineStyles;
@@ -1144,6 +1160,7 @@ implementation
 
 uses
   math,
+  md5,
   fpttf;
 
 
@@ -1180,6 +1197,9 @@ const
   // see http://paste.lisp.org/display/1105
   BEZIER: single = 0.5522847498; // = 4/3 * (sqrt(2) - 1);
 
+Var
+  PDFFormatSettings : TFormatSettings;
+
 
 function DateToPdfDate(const ADate: TDateTime): string;
 begin
@@ -1208,7 +1228,7 @@ begin
   try
     AFrom.Position := 0;
     c.CopyFrom(AFrom, AFrom.Size);
-    c.Flush;
+    //c.Flush; called in c.Free
   finally
     c.Free;
   end;
@@ -1321,6 +1341,19 @@ end;
 function PDFtoInches(APixels: TPDFFloat): single;
 begin
   Result := APixels / cDefaultDPI;
+end;
+
+{ TPDFRawHexString }
+
+procedure TPDFRawHexString.Write(const AStream: TStream);
+begin
+  WriteString('<'+FValue+'>', AStream);
+end;
+
+constructor TPDFRawHexString.Create(const ADocument: TPDFDocument; const AValue: String);
+begin
+  inherited Create(ADocument);
+  FValue := AValue;
 end;
 
 { TPDFMatrix }
@@ -2162,12 +2195,13 @@ begin
   if ADegrees <> 0.0 then
   begin
     rad := DegToRad(-ADegrees);
-    t1 := FormatFloat('0.###;;0', Cos(rad));
-    t2 := FormatFloat('0.###;;0', -Sin(rad));
-    t3 := FormatFloat('0.###;;0', Sin(rad));
+    t1 := FormatFloat('0.###;;0', Cos(rad), PDFFormatSettings);
+    t2 := FormatFloat('0.###;;0', -Sin(rad), PDFFormatSettings);
+    t3 := FormatFloat('0.###;;0', Sin(rad), PDFFormatSettings);
     AddObject(TPDFPushGraphicsStack.Create(Document));
     // PDF v1.3 page 132 & 143
-    AddObject(TPDFFreeFormString.Create(Document, Format('%s %s %s %s %.4f %.4f cm', [t1, t2, t3, t1, p1.X, p1.Y]) + CRLF));
+    AddObject(TPDFFreeFormString.Create(Document, Format('%s %s %s %s %.4f %.4f cm',
+      [t1, t2, t3, t1, p1.X, p1.Y], PDFFormatSettings) + CRLF));
     // co-ordinates are now based on the newly transformed matrix co-ordinates.
     R := Document.CreateRectangle(0, 0, p2.X, p2.Y, ALineWidth, AFill, AStroke);
   end
@@ -2205,12 +2239,13 @@ begin
   if ADegrees <> 0.0 then
   begin
     rad := DegToRad(-ADegrees);
-    t1 := FormatFloat('0.###;;0', Cos(rad));
-    t2 := FormatFloat('0.###;;0', -Sin(rad));
-    t3 := FormatFloat('0.###;;0', Sin(rad));
+    t1 := FormatFloat('0.###;;0', Cos(rad), PDFFormatSettings);
+    t2 := FormatFloat('0.###;;0', -Sin(rad), PDFFormatSettings);
+    t3 := FormatFloat('0.###;;0', Sin(rad), PDFFormatSettings);
     AddObject(TPDFPushGraphicsStack.Create(Document));
     // PDF v1.3 page 132 & 143
-    AddObject(TPDFFreeFormString.Create(Document, Format('%s %s %s %s %.4f %.4f cm', [t1, t2, t3, t1, p1.X, p1.Y]) + CRLF));
+    AddObject(TPDFFreeFormString.Create(Document, Format('%s %s %s %s %.4f %.4f cm',
+      [t1, t2, t3, t1, p1.X, p1.Y], PDFFormatSettings) + CRLF));
     // co-ordinates are now based on the newly transformed matrix co-ordinates.
     R := Document.CreateRoundedRectangle(0, 0, p2.X, p2.Y, p3.X, ALineWidth, AFill, AStroke);
   end
@@ -2235,12 +2270,13 @@ begin
   if ADegrees <> 0.0 then
   begin
     rad := DegToRad(-ADegrees);
-    t1 := FormatFloat('0.###;;0', Cos(rad));
-    t2 := FormatFloat('0.###;;0', -Sin(rad));
-    t3 := FormatFloat('0.###;;0', Sin(rad));
+    t1 := FormatFloat('0.###;;0', Cos(rad), PDFFormatSettings);
+    t2 := FormatFloat('0.###;;0', -Sin(rad), PDFFormatSettings);
+    t3 := FormatFloat('0.###;;0', Sin(rad), PDFFormatSettings);
     AddObject(TPDFPushGraphicsStack.Create(Document));
     // PDF v1.3 page 132 & 143
-    AddObject(TPDFFreeFormString.Create(Document, Format('%s %s %s %s %.4f %.4f cm', [t1, t2, t3, t1, p1.X, p1.Y]) + CRLF));
+    AddObject(TPDFFreeFormString.Create(Document, Format('%s %s %s %s %.4f %.4f cm',
+      [t1, t2, t3, t1, p1.X, p1.Y], PDFFormatSettings) + CRLF));
     // co-ordinates are now based on the newly transformed matrix co-ordinates.
     AddObject(Document.CreateImage(0, 0, APixelWidth, APixelHeight, ANumber));
   end
@@ -2273,12 +2309,13 @@ begin
   if ADegrees <> 0.0 then
   begin
     rad := DegToRad(-ADegrees);
-    t1 := FormatFloat('0.###;;0', Cos(rad));
-    t2 := FormatFloat('0.###;;0', -Sin(rad));
-    t3 := FormatFloat('0.###;;0', Sin(rad));
+    t1 := FormatFloat('0.###;;0', Cos(rad), PDFFormatSettings);
+    t2 := FormatFloat('0.###;;0', -Sin(rad), PDFFormatSettings);
+    t3 := FormatFloat('0.###;;0', Sin(rad), PDFFormatSettings);
     AddObject(TPDFPushGraphicsStack.Create(Document));
     // PDF v1.3 page 132 & 143
-    AddObject(TPDFFreeFormString.Create(Document, Format('%s %s %s %s %.4f %.4f cm', [t1, t2, t3, t1, p1.X, p1.Y]) + CRLF));
+    AddObject(TPDFFreeFormString.Create(Document, Format('%s %s %s %s %.4f %.4f cm',
+      [t1, t2, t3, t1, p1.X, p1.Y], PDFFormatSettings) + CRLF));
     // co-ordinates are now based on the newly transformed matrix co-ordinates.
     AddObject(Document.CreateImage(0, 0, p2.X, p2.Y, ANumber));
   end
@@ -2311,12 +2348,13 @@ begin
   if ADegrees <> 0.0 then
   begin
     rad := DegToRad(-ADegrees);
-    t1 := FormatFloat('0.###;;0', Cos(rad));
-    t2 := FormatFloat('0.###;;0', -Sin(rad));
-    t3 := FormatFloat('0.###;;0', Sin(rad));
+    t1 := FormatFloat('0.###;;0', Cos(rad), PDFFormatSettings);
+    t2 := FormatFloat('0.###;;0', -Sin(rad), PDFFormatSettings);
+    t3 := FormatFloat('0.###;;0', Sin(rad), PDFFormatSettings);
     AddObject(TPDFPushGraphicsStack.Create(Document));
     // PDF v1.3 page 132 & 143
-    AddObject(TPDFFreeFormString.Create(Document, Format('%s %s %s %s %.4f %.4f cm', [t1, t2, t3, t1, p1.X, p1.Y]) + CRLF));
+    AddObject(TPDFFreeFormString.Create(Document, Format('%s %s %s %s %.4f %.4f cm',
+      [t1, t2, t3, t1, p1.X, p1.Y], PDFFormatSettings) + CRLF));
     // co-ordinates are now based on the newly transformed matrix co-ordinates.
     AddObject(TPDFEllipse.Create(Document, 0, 0, p2.X, p2.Y, ALineWidth, AFill, AStroke));
   end
@@ -2557,6 +2595,8 @@ constructor TPDFDocumentObject.Create(const ADocument: TPDFDocument);
 begin
   inherited Create(ADocument);
   FDocument:=ADocument;
+  if Assigned(FDocument) then
+    FLineCapStyle := FDocument.LineCapStyle;
 end;
 
 procedure TPDFDocumentObject.SetWidth(AWidth: TPDFFloat; AStream : TStream);
@@ -2567,7 +2607,7 @@ begin
   S:=FloatStr(AWidth)+' w'; // stroke width
   if (S<>Document.CurrentWidth) then
     begin
-    WriteString('1 J'+CRLF, AStream); // line cap set to rounded edge
+    WriteString(IntToStr(Ord(FLineCapStyle))+' J'+CRLF, AStream); //set line cap
     WriteString(S+CRLF, AStream);
     Document.CurrentWidth:=S;
     end;
@@ -3343,8 +3383,8 @@ begin
 
   { line segment is relative to matrix translation coordinate, set above }
   if Underline then
-    WriteString(Format('0 -1.5 m %s -1.5 l S', [FloatStr(mmToPDF(lTextWidthInMM))]) + CRLF, AStream)
-  else
+    WriteString(Format('0 -1.5 m %s -1.5 l S', [FloatStr(mmToPDF(lTextWidthInMM))]) + CRLF, AStream);
+  if StrikeThrough then
     WriteString(Format('0 %s m %s %0:s l S', [FloatStr(mmToPDF(lTextHeightInMM) / 2), FloatStr(mmToPDF(lTextWidthInMM))]) + CRLF, AStream);
 
   { restore graphics state to before the translation matrix adjustment }
@@ -3434,8 +3474,8 @@ begin
 
   { line segment is relative to matrix translation coordinate, set above }
   if Underline then
-    WriteString(Format('0 -1.5 m %s -1.5 l S', [FloatStr(mmToPDF(lTextWidthInMM))]) + CRLF, AStream)
-  else
+    WriteString(Format('0 -1.5 m %s -1.5 l S', [FloatStr(mmToPDF(lTextWidthInMM))]) + CRLF, AStream);
+  if StrikeThrough then
     WriteString(Format('0 %s m %s %0:s l S', [FloatStr(mmToPDF(lTextHeightInMM) / 2), FloatStr(mmToPDF(lTextWidthInMM))]) + CRLF, AStream);
 
   { restore graphics state to before the translation matrix adjustment }
@@ -4105,12 +4145,12 @@ var
   i: integer;
   cid, gid: uint16;
   ba: TBytes;
-  lMaxCharID: integer;
+  lMaxCID: integer;
 begin
   lst := Document.Fonts[FontNum].TextMapping;
   lst.Sort;
-  lMaxCharID := lst.GetMaxCharID;
-  SetLength(ba, (lMaxCharID * 2)+1);
+  lMaxCID := lst.GetMaxGlyphID;
+  SetLength(ba, (lMaxCID + 1)*2);
   // initialize array to 0's
   for i := 0 to Length(ba)-1 do
     ba[i] := 0;
@@ -4124,7 +4164,7 @@ begin
   end;
 
   AStream.WriteBuffer(ba[0], Length(ba));
-  WriteString(CRLF, AStream);
+  //WriteString(CRLF, AStream);
   SetLength(ba, 0);
 end;
 
@@ -4155,7 +4195,7 @@ begin
     ba[gid] := ba[gid] or mask;
   end;
   AStream.WriteBuffer(ba[0], Length(ba));
-  WriteString(CRLF, AStream);
+  //WriteString(CRLF, AStream);
   SetLength(ba, 0);
 end;
 
@@ -4289,15 +4329,16 @@ begin
     M := TMemoryStream.Create;
     X.FStream.Write(M);
     d := M.Size;
-    X.Dict.AddInteger('Length', M.Size);
 
     if poCompressText in Options then
     begin
       MCompressed := TMemoryStream.Create;
       CompressStream(M, MCompressed);
       X.Dict.AddName('Filter', 'FlateDecode');
-      X.Dict.AddInteger('Length1', MCompressed.Size);
+      //X.Dict.AddInteger('Length1', MCompressed.Size); //Missing 'endstream' or incorrect stream length|stream Length incorrect
+      d :=  MCompressed.Size;
     end;
+    X.Dict.AddInteger('Length', d);
 
     X.Dict.Write(AStream);
 
@@ -4319,6 +4360,7 @@ begin
     end;
 
     M.Free;
+    TPDFObject.WriteString(CRLF, AStream);
     TPDFObject.WriteString('endstream', AStream);
   end;
   TPDFObject.WriteString(CRLF+'endobj'+CRLF+CRLF, AStream);
@@ -4368,6 +4410,20 @@ begin
     IDict.AddString('Creator',Infos.ApplicationName);
   IDict.AddString('Producer',Infos.Producer);
   IDict.AddString('CreationDate',DateToPdfDate(Infos.CreationDate));
+end;
+
+procedure TPDFDocument.CreateTrailerID;
+var
+  s: string;
+  ID: TPDFArray;
+begin
+  s := DateToPdfDate(Now) + IntToStr(GLobalXRefCount) +
+    Infos.Title + Infos.Author + Infos.ApplicationName + Infos.Producer + DateToPdfDate(Infos.CreationDate);
+  s := MD5Print(MD5String(s));
+  ID := CreateArray;
+  ID.AddItem(TPDFRawHexString.Create(Self, s));
+  ID.AddItem(TPDFRawHexString.Create(Self, s));
+  Trailer.AddElement('ID', ID);
 end;
 
 procedure TPDFDocument.CreatePreferencesEntry;
@@ -4682,11 +4738,16 @@ end;
 procedure TPDFDocument.CreateFontFileEntry(const AFontNum: integer);
 var
   FDict: TPDFDictionary;
+  Len: Integer;
 begin
   FDict:=CreateGlobalXRef.Dict;
   if poCompressFonts in Options then
     FDict.AddName('Filter','FlateDecode');
-  FDict.AddInteger('Length1 '+IntToStr(AFontNum), Fonts[AFontNum].FTrueTypeFile.OriginalSize);
+  if poSubsetFont in Options then
+    Len := Fonts[AFontNum].SubsetFont.Size
+  else
+    Len := Fonts[AFontNum].FTrueTypeFile.OriginalSize;
+  FDict.AddInteger('Length1 '+IntToStr(AFontNum), Len);
 end;
 
 procedure TPDFDocument.CreateCIDSet(const AFontNum: integer);
@@ -4886,6 +4947,7 @@ begin
   FZoomValue:='100';
   FOptions := [poCompressFonts, poCompressImages];
   FUnitOfMeasure:=uomMillimeters;
+  FLineCapStyle := plcsRoundCap;
 end;
 
 procedure TPDFDocument.StartDocument;
@@ -4896,6 +4958,7 @@ begin
   CreateTrailer;
   FCatalogue:=CreateCatalogEntry;
   CreateInfoEntry;
+  CreateTrailerID;
   CreatePreferencesEntry;
   if (FontDirectory = '') then
     FontDirectory:=ExtractFilePath(ParamStr(0));
@@ -5336,6 +5399,11 @@ begin
 end;
 
 
-
+initialization
+  PDFFormatSettings:= DefaultFormatSettings;
+  PDFFormatSettings.DecimalSeparator := '.';
+  PDFFormatSettings.ThousandSeparator := ',';
+  PDFFormatSettings.DateSeparator := '/';
+  PDFFormatSettings.TimeSeparator := ':';
 end.
 
