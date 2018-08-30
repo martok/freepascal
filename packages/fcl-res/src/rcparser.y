@@ -181,6 +181,7 @@ begin
       r.LangID:= aktresource.LangID;
       r.MemoryFlags:= aktresource.MemoryFlags;
       r.Characteristics:= aktresource.Characteristics;
+      r.Version:= aktresource.Version;
       r.FirstID:= ident;
       aktresources.Add(r);
     end;
