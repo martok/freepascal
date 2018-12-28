@@ -119,6 +119,9 @@ implementation
 
         AlmostExhaustive := False;
 
+        { make it a 32bit register }
+        indexreg:=cg.makeregsize(current_asmdata.CurrAsmList,hregister,OS_INT);
+        cg.a_load_reg_reg(current_asmdata.CurrAsmList,opcgsize,OS_INT,hregister,indexreg);
         if not(jumptable_no_range) then
           begin
 
@@ -145,12 +148,10 @@ implementation
             else
               begin
                 { a <= x <= b <-> unsigned(x-a) <= (b-a) }
-                cg.a_op_const_reg(current_asmdata.CurrAsmList,OP_SUB,opcgsize,aint(min_),hregister);
+                cg.a_op_const_reg(current_asmdata.CurrAsmList,OP_SUB,OS_INT,aint(min_),indexreg);
                 { case expr greater than max_ => goto elselabel }
-                cg.a_cmp_const_reg_label(current_asmdata.CurrAsmList,opcgsize,OC_A,aint(max_)-aint(min_),hregister,elselabel);
+                cg.a_cmp_const_reg_label(current_asmdata.CurrAsmList,OS_INT,OC_A,Range,indexreg,elselabel);
                 min_:=0;
-                { do not sign extend when we load the index register, as we applied an offset above }
-                opcgsize:=tcgsize2unsigned[opcgsize];
               end;
           end;
 

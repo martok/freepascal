@@ -118,6 +118,9 @@ implementation
         AlmostExhaustive := False;
         oldmin := min_;
 
+        { make it a 64bit register }
+        indexreg:=cg.makeregsize(jtlist,hregister,OS_INT);
+        cg.a_load_reg_reg(jtlist,opcgsize,OS_INT,hregister,indexreg);
         if not(jumptable_no_range) then
           begin
 
@@ -144,19 +147,15 @@ implementation
             else
               begin
                 { a <= x <= b <-> unsigned(x-a) <= (b-a) }
-                cg.a_op_const_reg(jtlist,OP_SUB,opcgsize,aint(min_),hregister);
+                cg.a_op_const_reg(jtlist,OP_SUB,OS_INT,aint(min_),indexreg);
                 { case expr greater than max_ => goto elselabel }
-                cg.a_cmp_const_reg_label(jtlist,opcgsize,OC_A,Range,hregister,elselabel);
+                cg.a_cmp_const_reg_label(jtlist,OS_INT,OC_A,Range,indexreg,elselabel);
                 min_:=0;
-                { do not sign extend when we load the index register, as we applied an offset above }
-                opcgsize:=tcgsize2unsigned[opcgsize];
               end;
           end;
 
         { local label in order to avoid using GOT }
         current_asmdata.getlabel(tablelabel,alt_data);
-        indexreg:=cg.makeregsize(jtlist,hregister,OS_ADDR);
-        cg.a_load_reg_reg(jtlist,opcgsize,OS_ADDR,hregister,indexreg);
         { load table address }
         reference_reset_symbol(href,tablelabel,0,4,[]);
         basereg:=cg.getaddressregister(jtlist);
