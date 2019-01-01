@@ -39,12 +39,23 @@ Working:
 }
 unit PasUseAnalyzer;
 
-{$mode objfpc}{$H+}{$inline on}
+{$mode objfpc}{$H+}
+{$inline on}
+
+{$ifdef fpc}
+  {$define UsePChar}
+  {$define HasInt64}
+{$endif}
 
 interface
 
 uses
-  Classes, SysUtils, Types, AVL_Tree,
+  {$ifdef pas2js}
+  js,
+  {$else}
+  AVL_Tree,
+  {$endif}
+  Classes, SysUtils, Types,
   PasTree, PScanner, PasResolveEval, PasResolver;
 
 const
@@ -88,7 +99,7 @@ type
   private
     FRefCount: integer;
   public
-    Id: int64;
+    Id: TMaxPrecInt;
     MsgType: TMessageType;
     MsgNumber: integer;
     MsgText: string;
@@ -148,6 +159,43 @@ type
     property Overrides[Index: integer]: TPasElement read GetOverrides; default;
   end;
 
+  {$ifdef pas2js}
+  TPASItemToNameProc = function(Item: Pointer): String;
+  {$endif}
+
+  { TPasAnalyzerKeySet - set of items, each item has a key, no duplicate keys }
+
+  TPasAnalyzerKeySet = class
+  private
+    {$ifdef pas2js}
+    FItems: TJSObject;
+    FCount: integer;
+    FItemToName: TPASItemToNameProc;
+    FKeyToName: TPASItemToNameProc;
+    {$else}
+    FTree: TAVLTree; // tree of pointers, sorted for keys given by OnItemToKey, no duplicate keys
+    FCompareKeyWithData: TListSortCompare;
+    {$endif}
+  public
+    {$ifdef pas2js}
+    constructor Create(const OnItemToName, OnKeyToName: TPASItemToNameProc); reintroduce;
+    {$else}
+    constructor Create(const OnCompareMethod: TListSortCompare;
+      const OnCompareKeyWithData: TListSortCompare);
+    {$endif}
+    destructor Destroy; override;
+    procedure Clear;
+    procedure FreeItems;
+    procedure Add(Item: Pointer; CheckDuplicates: boolean = true);
+    procedure Remove(Item: Pointer);
+    function ContainsItem(Item: Pointer): boolean;
+    function ContainsKey(Key: Pointer): boolean;
+    function FindItem(Item: Pointer): Pointer;
+    function FindKey(Key: Pointer): Pointer;
+    function Count: integer;
+    function GetList: TFPList; // list of items
+  end;
+
   TPasAnalyzerOption = (
     paoOnlyExports, // default: use all class members accessible from outside (protected, but not private)
     paoImplReferences // collect references of top lvl proc implementations, initializationa dn finalization sections
@@ -175,29 +223,26 @@ type
 
   TPasAnalyzer = class
   private
-    FChecked: array[TPAUseMode] of TAVLTree; // tree of TElement
+    FChecked: array[TPAUseMode] of TPasAnalyzerKeySet; // tree of TElement
     FOnMessage: TPAMessageEvent;
     FOptions: TPasAnalyzerOptions;
-    FOverrideLists: TAVLTree; // tree of TPAOverrideList sorted for Element
+    FOverrideLists: TPasAnalyzerKeySet; // tree of TPAOverrideList sorted for Element
     FResolver: TPasResolver;
     FScopeModule: TPasModule;
-    FUsedElements: TAVLTree; // tree of TPAElement sorted for Element
+    FUsedElements: TPasAnalyzerKeySet; // tree of TPAElement sorted for Element
     procedure UseElType(El: TPasElement; aType: TPasType; Mode: TPAUseMode); inline;
     function AddOverride(OverriddenEl, OverrideEl: TPasElement): boolean;
-    function FindOverrideNode(El: TPasElement): TAVLTreeNode;
-    function FindOverrideList(El: TPasElement): TPAOverrideList;
     procedure SetOptions(AValue: TPasAnalyzerOptions);
     procedure UpdateAccess(IsWrite: Boolean; IsRead: Boolean; Usage: TPAElement);
     procedure OnUseScopeRef(Data, DeclScope: pointer);
   protected
-    procedure RaiseInconsistency(const Id: int64; Msg: string);
-    procedure RaiseNotSupported(const Id: int64; El: TPasElement; const Msg: string = '');
+    procedure RaiseInconsistency(const Id: TMaxPrecInt; Msg: string);
+    procedure RaiseNotSupported(const Id: TMaxPrecInt; El: TPasElement; const Msg: string = '');
     function FindTopImplScope(El: TPasElement): TPasScope;
     // mark used elements
     function Add(El: TPasElement; CheckDuplicate: boolean = true;
       aClass: TPAElementClass = nil): TPAElement;
-    function FindNode(El: TPasElement): TAVLTreeNode; inline;
-    function FindPAElement(El: TPasElement): TPAElement; inline;
+    function PAElementExists(El: TPasElement): boolean; inline;
     procedure CreateTree; virtual;
     function MarkElementAsUsed(El: TPasElement; aClass: TPAElementClass = nil): boolean; // true if new
     function ElementVisited(El: TPasElement; Mode: TPAUseMode): boolean;
@@ -217,8 +262,7 @@ type
     procedure UseProcedure(Proc: TPasProcedure); virtual;
     procedure UseProcedureType(ProcType: TPasProcedureType; Mark: boolean); virtual;
     procedure UseType(El: TPasType; Mode: TPAUseMode); virtual;
-    procedure UseRecordType(El: TPasRecordType; Mode: TPAUseMode); virtual;
-    procedure UseClassType(El: TPasClassType; Mode: TPAUseMode); virtual;
+    procedure UseClassOrRecType(El: TPasMembersType; Mode: TPAUseMode); virtual;
     procedure UseVariable(El: TPasVariable; Access: TResolvedRefAccess;
       UseFull: boolean); virtual;
     procedure UseResourcestring(El: TPasResString); virtual;
@@ -238,7 +282,7 @@ type
     procedure AnalyzeModule(aModule: TPasModule);
     procedure AnalyzeWholeProgram(aStartModule: TPasProgram);
     procedure EmitModuleHints(aModule: TPasModule); virtual;
-    function FindElement(El: TPasElement): TPAElement;
+    function FindElement(El: TPasElement): TPAElement; inline;
     function FindUsedElement(El: TPasElement): TPAElement;
     // utility
     function IsUsed(El: TPasElement): boolean; // valid after calling Analyze*
@@ -247,8 +291,10 @@ type
     function IsExport(El: TPasElement): boolean;
     function IsIdentifier(El: TPasElement): boolean;
     function IsImplBlockEmpty(El: TPasImplBlock): boolean;
-    procedure EmitMessage(Id: int64; MsgType: TMessageType;
-      MsgNumber: integer; Fmt: String; const Args: array of const; PosEl: TPasElement);
+    procedure EmitMessage(Id: TMaxPrecInt; MsgType: TMessageType;
+      MsgNumber: integer; Fmt: String;
+      const Args: array of {$ifdef pas2js}jsvalue{$else}const{$endif};
+      PosEl: TPasElement);
     procedure EmitMessage(Msg: TPAMessage);
     class function GetWarnIdentifierNumbers(Identifier: string;
       out MsgNumbers: TIntegerDynArray): boolean; virtual;
@@ -259,15 +305,43 @@ type
     property ScopeModule: TPasModule read FScopeModule write FScopeModule;
   end;
 
+{$ifdef pas2js}
+function PasElementToHashName(Item: Pointer): String;
+function PAElement_ElToHashName(Item: Pointer): String;
+function PAOverrideList_ElToHashName(Item: Pointer): String;
+{$else}
 function ComparePAElements(Identifier1, Identifier2: Pointer): integer;
 function CompareElementWithPAElement(El, Id: Pointer): integer;
 function ComparePAOverrideLists(List1, List2: Pointer): integer;
 function CompareElementWithPAOverrideList(El, List: Pointer): integer;
+{$endif}
 function GetElModName(El: TPasElement): string;
 function dbgs(a: TPAIdentifierAccess): string; overload;
 
 implementation
 
+{$ifdef pas2js}
+function PasElementToHashName(Item: Pointer): String;
+var
+  El: TPasElement absolute Item;
+begin
+  Result:=string(jsvalue(El.PasElementId));
+end;
+
+function PAElement_ElToHashName(Item: Pointer): String;
+var
+  El: TPAElement absolute Item;
+begin
+  Result:=string(jsvalue(El.Element.PasElementId));
+end;
+
+function PAOverrideList_ElToHashName(Item: Pointer): String;
+var
+  List: TPAOverrideList absolute Item;
+begin
+  Result:=string(jsvalue(List.Element.PasElementId));
+end;
+{$else}
 function ComparePointer(Data1, Data2: Pointer): integer;
 begin
   if Data1>Data2 then Result:=-1
@@ -304,25 +378,212 @@ var
 begin
   Result:=ComparePointer(El,OvList.Element);
 end;
+{$endif}
 
 function GetElModName(El: TPasElement): string;
 var
   aModule: TPasModule;
 begin
   if El=nil then exit('nil');
-  Result:=El.FullName+':'+El.ClassName;
+  Result:=El.PathName+':'+El.ClassName;
   aModule:=El.GetModule;
   if aModule=El then exit;
   if aModule=nil then
-    Result:='NilModule.'+Result
-  else
-    Result:=aModule.Name+'.'+Result;
+    Result:='NilModule.'+Result;
 end;
 
 function dbgs(a: TPAIdentifierAccess): string;
 begin
   str(a,Result);
 end;
+
+{ TPasAnalyzerKeySet }
+
+{$ifdef pas2js}
+constructor TPasAnalyzerKeySet.Create(const OnItemToName,
+  OnKeyToName: TPASItemToNameProc);
+begin
+  FItemToName:=OnItemToName;
+  FKeyToName:=OnKeyToName;
+  FItems:=TJSObject.new;
+end;
+{$else}
+constructor TPasAnalyzerKeySet.Create(const OnCompareMethod: TListSortCompare;
+  const OnCompareKeyWithData: TListSortCompare);
+begin
+  FTree:=TAVLTree.Create(OnCompareMethod);
+  FCompareKeyWithData:=OnCompareKeyWithData;
+end;
+{$endif}
+
+destructor TPasAnalyzerKeySet.Destroy;
+begin
+  {$ifdef pas2js}
+  FItems:=nil;
+  {$else}
+  FreeAndNil(FTree);
+  {$endif}
+  inherited Destroy;
+end;
+
+procedure TPasAnalyzerKeySet.Clear;
+begin
+  {$ifdef pas2js}
+  FItems:=TJSObject.new;
+  FCount:=0;
+  {$else}
+  FTree.Clear;
+  {$endif}
+end;
+
+procedure TPasAnalyzerKeySet.FreeItems;
+{$ifdef pas2js}
+var
+  List: TStringDynArray;
+  i: Integer;
+begin
+  List:=TJSObject.getOwnPropertyNames(FItems);
+  for i:=0 to length(List)-1 do
+    TObject(FItems[List[i]]).Destroy;
+  FItems:=TJSObject.new;
+  FCount:=0;
+end;
+{$else}
+begin
+  FTree.FreeAndClear;
+end;
+{$endif}
+
+procedure TPasAnalyzerKeySet.Add(Item: Pointer; CheckDuplicates: boolean);
+begin
+  if CheckDuplicates {$IFDEF VerbosePasAnalyzer}or true{$endif} then
+    if ContainsItem(Item) then
+      raise Exception.Create('[20181101151755] TPasAnalyzerSet.Add duplicate');
+  {$ifdef pas2js}
+  FItems['%'+FItemToName(Item)]:=Item;
+  inc(FCount);
+  {$else}
+  FTree.Add(Item);
+  {$endif}
+  {$ifdef VerbosePasAnalyzer}
+  if not ContainsItem(Item) then
+    raise Exception.Create('[20181101151811] TPasAnalyzerSet.Add failed');
+  {$endif}
+end;
+
+procedure TPasAnalyzerKeySet.Remove(Item: Pointer);
+{$ifdef pas2js}
+var
+  aName: string;
+begin
+  aName:='%'+FItemToName(Item);
+  if not FItems.hasOwnProperty(aName) then exit;
+  JSDelete(FItems,aName);
+  dec(FCount);
+end;
+{$else}
+begin
+  FTree.Remove(Item);
+end;
+{$endif}
+
+function TPasAnalyzerKeySet.ContainsItem(Item: Pointer): boolean;
+begin
+  {$ifdef pas2js}
+  Result:=FItems.hasOwnProperty('%'+FItemToName(Item));
+  {$else}
+  Result:=FTree.Find(Item)<>nil;
+  {$endif}
+end;
+
+function TPasAnalyzerKeySet.ContainsKey(Key: Pointer): boolean;
+begin
+  {$ifdef pas2js}
+  Result:=FItems.hasOwnProperty('%'+FKeyToName(Key));
+  {$else}
+  Result:=FTree.FindKey(Key,FCompareKeyWithData)<>nil;
+  {$endif}
+end;
+
+function TPasAnalyzerKeySet.FindItem(Item: Pointer): Pointer;
+{$ifdef pas2js}
+var
+  aName: string;
+begin
+  aName:='%'+FItemToName(Item);
+  if not FItems.hasOwnProperty(aName) then
+    exit(nil)
+  else
+    Result:=Pointer(FItems[aName]);
+end;
+{$else}
+var
+  Node: TAVLTreeNode;
+begin
+  Node:=FTree.Find(Item);
+  if Node<>nil then
+    Result:=Node.Data
+  else
+    Result:=nil;
+end;
+{$endif}
+
+function TPasAnalyzerKeySet.FindKey(Key: Pointer): Pointer;
+{$ifdef pas2js}
+var
+  aName: string;
+begin
+  aName:='%'+FKeyToName(Key);
+  if not FItems.hasOwnProperty(aName) then
+    exit(nil)
+  else
+    Result:=Pointer(FItems[aName]);
+end;
+{$else}
+var
+  Node: TAVLTreeNode;
+begin
+  Node:=FTree.FindKey(Key,FCompareKeyWithData);
+  if Node<>nil then
+    Result:=Node.Data
+  else
+    Result:=nil;
+end;
+{$endif}
+
+function TPasAnalyzerKeySet.Count: integer;
+begin
+  {$ifdef pas2js}
+  Result:=FCount;
+  {$else}
+  Result:=FTree.Count;
+  {$endif}
+end;
+
+function TPasAnalyzerKeySet.GetList: TFPList;
+{$ifdef pas2js}
+var
+  List: TStringDynArray;
+  i: Integer;
+begin
+  List:=TJSObject.getOwnPropertyNames(FItems);
+  Result:=TFPList.Create;
+  for i:=0 to length(List)-1 do
+    Result.Add(FItems[List[i]]);
+end;
+{$else}
+var
+  Node: TAVLTreeNode;
+begin
+  Result:=TFPList.Create;
+  Node:=FTree.FindLowest;
+  while Node<>nil do
+    begin
+    Result.Add(Node.Data);
+    Node:=FTree.FindSuccessor(Node);
+    end;
+end;
+{$endif}
 
 { TPAMessage }
 
@@ -342,7 +603,11 @@ begin
     raise Exception.Create('');
   dec(FRefCount);
   if FRefCount=0 then
+    {$ifdef pas2js}
+    Destroy;
+    {$else}
     Free;
+    {$endif}
 end;
 
 { TPAOverrideList }
@@ -417,21 +682,9 @@ end;
 { TPasAnalyzer }
 
 // inline
-function TPasAnalyzer.FindNode(El: TPasElement): TAVLTreeNode;
+function TPasAnalyzer.PAElementExists(El: TPasElement): boolean;
 begin
-  Result:=FUsedElements.FindKey(El,@CompareElementWithPAElement);
-end;
-
-// inline
-function TPasAnalyzer.FindPAElement(El: TPasElement): TPAElement;
-var
-  Node: TAVLTreeNode;
-begin
-  Node:=FindNode(El);
-  if Node=nil then
-    Result:=nil
-  else
-    Result:=TPAElement(Node.Data);
+  Result:=FUsedElements.ContainsKey(El);
 end;
 
 // inline
@@ -443,33 +696,22 @@ begin
   UseType(aType,Mode);
 end;
 
+// inline
+function TPasAnalyzer.FindElement(El: TPasElement): TPAElement;
+begin
+  Result:=TPAElement(FUsedElements.FindKey(El));
+end;
+
 procedure TPasAnalyzer.SetOptions(AValue: TPasAnalyzerOptions);
 begin
   if FOptions=AValue then Exit;
   FOptions:=AValue;
 end;
 
-function TPasAnalyzer.FindOverrideNode(El: TPasElement): TAVLTreeNode;
-begin
-  Result:=FOverrideLists.FindKey(El,@CompareElementWithPAOverrideList);
-end;
-
-function TPasAnalyzer.FindOverrideList(El: TPasElement): TPAOverrideList;
-var
-  Node: TAVLTreeNode;
-begin
-  Node:=FindOverrideNode(El);
-  if Node=nil then
-    Result:=nil
-  else
-    Result:=TPAOverrideList(Node.Data);
-end;
-
 function TPasAnalyzer.AddOverride(OverriddenEl, OverrideEl: TPasElement): boolean;
 // OverrideEl overrides OverriddenEl
 // returns true if new override
 var
-  Node: TAVLTreeNode;
   Item: TPAOverrideList;
   OverriddenPAEl: TPAElement;
   TypeEl: TPasType;
@@ -477,16 +719,15 @@ begin
   {$IFDEF VerbosePasAnalyzer}
   writeln('TPasAnalyzer.AddOverride OverriddenEl=',GetElModName(OverriddenEl),' OverrideEl=',GetElModName(OverrideEl));
   {$ENDIF}
-  Node:=FindOverrideNode(OverriddenEl);
-  if Node=nil then
+  Item:=TPAOverrideList(FOverrideLists.FindKey(OverriddenEl));
+  if Item=nil then
     begin
     Item:=TPAOverrideList.Create;
     Item.Element:=OverriddenEl;
-    FOverrideLists.Add(Item);
+    FOverrideLists.Add(Item,false);
     end
   else
     begin
-    Item:=TPAOverrideList(Node.Data);
     if Item.IndexOf(OverrideEl)>=0 then
       exit(false);
     end;
@@ -494,7 +735,7 @@ begin
   Item.Add(OverrideEl);
   Result:=true;
 
-  OverriddenPAEl:=FindPAElement(OverriddenEl);
+  OverriddenPAEl:=FindElement(OverriddenEl);
   if OverriddenPAEl<>nil then
     begin
     // OverriddenEl was already used -> use OverrideEl
@@ -567,7 +808,7 @@ begin
     end;
 end;
 
-procedure TPasAnalyzer.RaiseInconsistency(const Id: int64; Msg: string);
+procedure TPasAnalyzer.RaiseInconsistency(const Id: TMaxPrecInt; Msg: string);
 begin
   {$IFDEF VerbosePasAnalyzer}
   writeln('TPasAnalyzer.RaiseInconsistency ['+IntToStr(Id)+']: '+Msg);
@@ -575,7 +816,7 @@ begin
   raise EPasAnalyzer.Create('['+IntToStr(Id)+']: '+Msg);
 end;
 
-procedure TPasAnalyzer.RaiseNotSupported(const Id: int64; El: TPasElement;
+procedure TPasAnalyzer.RaiseNotSupported(const Id: TMaxPrecInt; El: TPasElement;
   const Msg: string);
 var
   s: String;
@@ -626,9 +867,10 @@ begin
   if El=nil then
     RaiseInconsistency(20170308093407,'');
   {$IFDEF VerbosePasAnalyzer}
-  writeln('TPasAnalyzer.Add ',GetElModName(El),' New=',FindNode(El)=nil);
+  writeln('TPasAnalyzer.Add ',GetElModName(El),' New=',not PAElementExists(El){$IFDEF Pas2js},' ID=[',El.PasElementId,']'{$ENDIF});
   {$ENDIF}
-  if CheckDuplicate and (FindNode(El)<>nil) then
+  {$IFDEF VerbosePasAnalyzer}CheckDuplicate:=true;{$ENDIF}
+  if CheckDuplicate and PAElementExists(El) then
     RaiseInconsistency(20170304201318,'');
   if aClass=nil then
     aClass:=TPAElement;
@@ -636,13 +878,18 @@ begin
   Result.Element:=El;
   FUsedElements.Add(Result);
   {$IFDEF VerbosePasAnalyzer}
-  //writeln('TPasAnalyzer.Add END ',GetElModName(El),' Success=',FindNode(El)<>nil,' ',ptruint(pointer(El)));
+  writeln('TPasAnalyzer.Add END ',GetElModName(El),' Success=',PAElementExists(El),' '{$Ifdef pas2js},El.PasElementId{$endif});
   {$ENDIF}
 end;
 
 procedure TPasAnalyzer.CreateTree;
 begin
-  FUsedElements:=TAVLTree.Create(@ComparePAElements);
+  FUsedElements:=TPasAnalyzerKeySet.Create(
+    {$ifdef pas2js}
+    @PAElement_ElToHashName,@PasElementToHashName
+    {$else}
+    @ComparePAElements,@CompareElementWithPAElement
+    {$endif});
 end;
 
 function TPasAnalyzer.MarkElementAsUsed(El: TPasElement; aClass: TPAElementClass
@@ -650,7 +897,7 @@ function TPasAnalyzer.MarkElementAsUsed(El: TPasElement; aClass: TPAElementClass
 
   function MarkModule(CurModule: TPasModule): boolean;
   begin
-    if FindNode(CurModule)<>nil then
+    if PAElementExists(CurModule) then
       exit(false);
     {$IFDEF VerbosePasAnalyzer}
     writeln('TPasAnalyzer.MarkElement.MarkModule mark "',GetElModName(CurModule),'"');
@@ -686,7 +933,7 @@ begin
     end;
 
   // mark element
-  if FindNode(El)<>nil then exit(false);
+  if PAElementExists(El) then exit(false);
   Add(El,false,aClass);
   Result:=true;
 
@@ -705,9 +952,9 @@ function TPasAnalyzer.ElementVisited(El: TPasElement; Mode: TPAUseMode
 begin
   if El=nil then
     exit(true);
-  if FChecked[Mode].Find(El)<>nil then exit(true);
+  if FChecked[Mode].ContainsItem(El) then exit(true);
   Result:=false;
-  FChecked[Mode].Add(El);
+  FChecked[Mode].Add(El,false);
 end;
 
 procedure TPasAnalyzer.MarkImplScopeRef(El, RefEl: TPasElement;
@@ -900,7 +1147,7 @@ procedure TPasAnalyzer.UseModule(aModule: TPasModule; Mode: TPAUseMode);
     UseScopeReferences(Scope.References);
     if (Scope.References=nil) and IsImplBlockEmpty(ImplBlock) then exit;
     // this module has an initialization section -> mark module
-    if FindNode(aModule)=nil then
+    if not PAElementExists(aModule) then
       Add(aModule);
     UseImplBlock(ImplBlock,true);
   end;
@@ -911,7 +1158,7 @@ begin
   if ElementVisited(aModule,Mode) then exit;
 
   {$IFDEF VerbosePasAnalyzer}
-  writeln('TPasAnalyzer.UseModule ',GetElModName(aModule),' Mode=',Mode);
+  writeln('TPasAnalyzer.UseModule ',GetElModName(aModule),' Mode=',Mode{$IFDEF pas2js},' ',aModule.PasElementId{$ENDIF});
   {$ENDIF}
   if Mode in [paumAllExports,paumAllPasUsable] then
     begin
@@ -930,13 +1177,13 @@ begin
   UseInitFinal(aModule.FinalizationSection);
   ModScope:=aModule.CustomData as TPasModuleScope;
   if ModScope.RangeErrorClass<>nil then
-    UseClassType(ModScope.RangeErrorClass,paumElement);
+    UseClassOrRecType(ModScope.RangeErrorClass,paumElement);
   if ModScope.RangeErrorConstructor<>nil then
     UseProcedure(ModScope.RangeErrorConstructor);
 
   if Mode=paumElement then
     // e.g. a reference: unitname.identifier
-    if FindNode(aModule)=nil then
+    if not PAElementExists(aModule) then
       Add(aModule);
 end;
 
@@ -979,7 +1226,7 @@ begin
         if IsImplBlockEmpty(UsedModule.InitializationSection)
             and IsImplBlockEmpty(UsedModule.FinalizationSection) then
           continue;
-        if FindNode(UsedModule)=nil then
+        if not PAElementExists(UsedModule) then
           Add(UsedModule);
         UseImplBlock(UsedModule.InitializationSection,true);
         UseImplBlock(UsedModule.FinalizationSection,true);
@@ -1112,6 +1359,8 @@ begin
     UseImplElement(TPasImplIfElse(El).IfBranch);
     UseImplElement(TPasImplIfElse(El).ElseBranch);
     end
+  else if C=TPasImplCommand then
+    // used for if-then <empty> -> nothing to do
   else if C=TPasImplLabelMark then
     // label mark
   else if C=TPasImplRepeatUntil then
@@ -1229,6 +1478,25 @@ begin
         begin
         BuiltInProc:=TResElDataBuiltInProc(Decl.CustomData);
         case BuiltInProc.BuiltIn of
+        bfExit:
+          begin
+          if El.Parent is TParamsExpr then
+            begin
+            Params:=(El.Parent as TParamsExpr).Params;
+            if length(Params)=1 then
+              begin
+              SubEl:=El.Parent;
+              while (SubEl<>nil) and not (SubEl is TPasProcedure) do
+                SubEl:=SubEl.Parent;
+              if (SubEl is TPasProcedure)
+                  and (TPasProcedure(SubEl).ProcType is TPasFunctionType) then
+                begin
+                SubEl:=TPasFunctionType(TPasProcedure(SubEl).ProcType).ResultEl;
+                UseElement(SubEl,rraAssign,false);
+                end;
+              end;
+            end;
+          end;
         bfTypeInfo:
           begin
           Params:=(El.Parent as TParamsExpr).Params;
@@ -1240,9 +1508,10 @@ begin
           {$ENDIF}
           if ParamResolved.IdentEl=nil then
             RaiseNotSupported(20180628155107,Params[0]);
-          if ParamResolved.IdentEl is TPasFunction then
+          if (ParamResolved.IdentEl is TPasProcedure)
+              and (TPasProcedure(ParamResolved.IdentEl).ProcType is TPasFunctionType) then
             begin
-            SubEl:=TPasFunction(ParamResolved.IdentEl).FuncType.ResultEl.ResultType;
+            SubEl:=TPasFunctionType(TPasProcedure(ParamResolved.IdentEl).ProcType).ResultEl.ResultType;
             MarkImplScopeRef(El,SubEl,psraTypeInfo);
             UseTypeInfo(SubEl);
             end
@@ -1295,8 +1564,15 @@ begin
     for i:=0 to length(Params)-1 do
       UseExpr(Params[i]);
     end
+  else if C=TRecordValues then
+    begin
+    for i:=0 to length(TRecordValues(El).Fields)-1 do
+      UseExpr(TRecordValues(El).Fields[i].ValueExp);
+    end
   else if C=TInheritedExpr then
     UseInheritedExpr(TInheritedExpr(El))
+  else if C=TProcedureExpr then
+    UseProcedure(TProcedureExpr(El).Proc)
   else
     RaiseNotSupported(20170307085444,El);
 end;
@@ -1309,6 +1585,7 @@ var
   Bin: TBinaryExpr;
   Params: TParamsExpr;
   ValueResolved: TPasResolverResult;
+  Unary: TUnaryExpr;
 begin
   C:=Expr.ClassType;
   if C=TBinaryExpr then
@@ -1346,6 +1623,14 @@ begin
       UseElement(Ref.Declaration,Access,UseFull);
       end;
     end
+  else if C=TUnaryExpr then
+    begin
+    Unary:=TUnaryExpr(Expr);
+    if Unary.OpCode in [eopAdd,eopSubtract,eopAddress,eopDeref,eopMemAddress] then
+      UseExprRef(El,Unary.Operand,rraRead,false)
+    else
+      RaiseNotSupported(20181015193334,Expr,OpcodeStrings[Unary.OpCode]);
+    end
   else if (Access=rraRead)
       and ((C=TPrimitiveExpr) // Kind<>pekIdent
         or (C=TNilExpr)
@@ -1357,7 +1642,7 @@ begin
     {$IFDEF VerbosePasResolver}
     writeln('TPasResolver.UseExprRef Expr=',GetObjName(Expr),' Access=',Access,' Declaration="',Expr.GetDeclaration(false),'"');
     {$ENDIF}
-    RaiseNotSupported(20170306102158,Expr);
+    RaiseNotSupported(20170306102159,Expr);
     end;
 end;
 
@@ -1411,7 +1696,7 @@ procedure TPasAnalyzer.UseProcedure(Proc: TPasProcedure);
     i: Integer;
     OverrideProc: TPasProcedure;
   begin
-    OverrideList:=FindOverrideList(CurProc);
+    OverrideList:=TPAOverrideList(FOverrideLists.FindKey(CurProc));
     if OverrideList=nil then exit;
     // Note: while traversing the OverrideList it may grow
     i:=0;
@@ -1529,10 +1814,8 @@ begin
     {$IFDEF VerbosePasAnalyzer}
     writeln('TPasAnalyzer.UseType searching exports in ',GetElModName(El),' ...');
     {$ENDIF}
-    if C=TPasRecordType then
-      UseRecordType(TPasRecordType(El),Mode)
-    else if C=TPasClassType then
-      UseClassType(TPasClassType(El),Mode);
+    if (C=TPasRecordType) or (C=TPasClassType) then
+      UseClassOrRecType(TPasMembersType(El),Mode);
     end
   else
     begin
@@ -1562,10 +1845,8 @@ begin
         UseExpr(TPasArrayType(El).Ranges[i]);
       UseElType(El,TPasArrayType(El).ElType,Mode);
       end
-    else if C=TPasRecordType then
-      UseRecordType(TPasRecordType(El),Mode)
-    else if C=TPasClassType then
-      UseClassType(TPasClassType(El),Mode)
+    else if (C=TPasRecordType) or (C=TPasClassType) then
+      UseClassOrRecType(TPasMembersType(El),Mode)
     else if C=TPasEnumType then
       begin
       if not MarkElementAsUsed(El) then exit;
@@ -1597,22 +1878,7 @@ begin
     end;
 end;
 
-procedure TPasAnalyzer.UseRecordType(El: TPasRecordType; Mode: TPAUseMode);
-// called by UseType
-var
-  i: Integer;
-begin
-  if Mode=paumAllExports then exit;
-  MarkElementAsUsed(El);
-  if not ElementVisited(El,Mode) then
-    begin
-    if (Mode=paumAllPasUsable) or Resolver.IsTGUID(El) then
-      for i:=0 to El.Members.Count-1 do
-        UseVariable(TObject(El.Members[i]) as TPasVariable,rraNone,true);
-    end;
-end;
-
-procedure TPasAnalyzer.UseClassType(El: TPasClassType; Mode: TPAUseMode);
+procedure TPasAnalyzer.UseClassOrRecType(El: TPasMembersType; Mode: TPAUseMode);
 // called by UseType
 
   procedure UseDelegations;
@@ -1621,7 +1887,7 @@ procedure TPasAnalyzer.UseClassType(El: TPasClassType; Mode: TPAUseMode);
     i: Integer;
     Prop: TPasProperty;
   begin
-    OverrideList:=FindOverrideList(El);
+    OverrideList:=TPAOverrideList(FOverrideLists.FindKey(El));
     if OverrideList=nil then exit;
     // Note: while traversing the OverrideList it may grow
     i:=0;
@@ -1650,7 +1916,7 @@ procedure TPasAnalyzer.UseClassType(El: TPasClassType; Mode: TPAUseMode);
         Map:=TPasClassIntfMap(o);
         repeat
           if Map.Intf<>nil then
-            UseClassType(TPasClassType(Map.Intf),paumElement);
+            UseClassOrRecType(TPasClassType(Map.Intf),paumElement);
           if Map.Procs<>nil then
             for j:=0 to Map.Procs.Count-1 do
               UseProcedure(TPasProcedure(Map.Procs[j]));
@@ -1674,6 +1940,7 @@ var
   o: TObject;
   Map: TPasClassIntfMap;
   ImplProc, IntfProc: TPasProcedure;
+  aClass: TPasClassType;
 begin
   FirstTime:=true;
   case Mode of
@@ -1696,35 +1963,54 @@ begin
   {$IFDEF VerbosePasAnalyzer}
   writeln('TPasAnalyzer.UseClassType ',GetElModName(El),' ',Mode,' First=',FirstTime);
   {$ENDIF}
-  if El.IsForward then
-    begin
-    Ref:=El.CustomData as TResolvedReference;
-    UseClassType(Ref.Declaration as TPasClassType,Mode);
-    exit;
-    end;
-
-  ClassScope:=El.CustomData as TPasClassScope;
-  if ClassScope=nil then
-    exit; // ClassScope can be nil if msIgnoreInterfaces
-
+  aClass:=nil;
+  ClassScope:=nil;
   IsCOMInterfaceRoot:=false;
-  if FirstTime then
+
+  if El is TPasClassType then
     begin
-    UseElType(El,ClassScope.DirectAncestor,paumElement);
-    UseElType(El,El.HelperForType,paumElement);
-    UseExpr(El.GUIDExpr);
-    // El.Interfaces: using a class does not use automatically the interfaces
-    if El.ObjKind=okInterface then
+    aClass:=TPasClassType(El);
+    if aClass.IsForward then
       begin
-      UseDelegations;
-      if (El.InterfaceType=citCom) and (El.AncestorType=nil) then
-        IsCOMInterfaceRoot:=true;
+      Ref:=aClass.CustomData as TResolvedReference;
+      UseClassOrRecType(Ref.Declaration as TPasClassType,Mode);
+      exit;
       end;
-    if (El.ObjKind=okClass) and (ScopeModule<>nil)
-        and (ClassScope.Interfaces<>nil) then
-      // when checking a single unit, mark all method+properties implementing the interfaces
-      MarkAllInterfaceImplementations(ClassScope);
-    end;
+
+    ClassScope:=aClass.CustomData as TPasClassScope;
+    if ClassScope=nil then
+      exit; // ClassScope can be nil if msIgnoreInterfaces
+
+    if FirstTime then
+      begin
+      UseElType(El,ClassScope.DirectAncestor,paumElement);
+      UseElType(El,aClass.HelperForType,paumElement);
+      UseExpr(aClass.GUIDExpr);
+      // aClass.Interfaces: using a class does not use automatically the interfaces
+      if aClass.ObjKind=okInterface then
+        begin
+        UseDelegations;
+        if (aClass.InterfaceType=citCom) and (aClass.AncestorType=nil) then
+          IsCOMInterfaceRoot:=true;
+        end;
+      if (aClass.ObjKind=okClass) and (ScopeModule<>nil)
+          and (ClassScope.Interfaces<>nil) then
+        // when checking a single unit, mark all method+properties implementing the interfaces
+        MarkAllInterfaceImplementations(ClassScope);
+      end;
+    end
+  else if El is TPasRecordType then
+    begin
+    if (Mode<>paumAllPasUsable) and Resolver.IsTGUID(TPasRecordType(El)) then
+      for i:=0 to El.Members.Count-1 do
+        begin
+        Member:=TPasElement(El.Members[i]);
+        if Member is TPasVariable then
+          UseVariable(TPasVariable(Member),rraNone,true);
+        end;
+    end
+  else
+    RaiseNotSupported(20181229103139,El);
 
   // members
   AllPublished:=(Mode<>paumAllExports);
@@ -1788,11 +2074,11 @@ begin
       UseTypeInfo(Member);
       end
     else
-      ; // else: class is in unit interface, mark all non private members
+      ; // else: class/record is in unit interface, mark all non private members
     UseElement(Member,rraNone,true);
     end;
 
-  if FirstTime then
+  if FirstTime and (ClassScope<>nil) then
     begin
     // method resolution
     List:=ClassScope.Interfaces;
@@ -1804,7 +2090,7 @@ begin
           begin
           // interface delegation
           // Note: This class is used. When the intftype is used, this delegation is used.
-          AddOverride(TPasType(El.Interfaces[i]),TPasProperty(o));
+          AddOverride(TPasType(aClass.Interfaces[i]),TPasProperty(o));
           end
         else if o is TPasClassIntfMap then
           begin
@@ -1825,7 +2111,7 @@ begin
             end;
           end
         else
-          RaiseNotSupported(20180328224632,El,GetObjName(o));
+          RaiseNotSupported(20180328224632,aClass,GetObjName(o));
         end;
     end;
 end;
@@ -2069,6 +2355,7 @@ var
   UsedModule, aModule: TPasModule;
   UsesClause: TPasUsesClause;
   Use: TPasUsesUnit;
+  PosEl: TPasElement;
 begin
   {$IFDEF VerbosePasAnalyzer}
   writeln('TPasAnalyzer.EmitSectionHints ',GetElModName(Section));
@@ -2083,9 +2370,13 @@ begin
       begin
       UsedModule:=TPasModule(Use.Module);
       if CompareText(UsedModule.Name,'system')=0 then continue;
-      if FindNode(UsedModule)=nil then
+      if not PAElementExists(UsedModule) then
+        begin
+        PosEl:=Use.Expr;
+        if PosEl=nil then PosEl:=Use;
         EmitMessage(20170311191725,mtHint,nPAUnitNotUsed,sPAUnitNotUsed,
-          [UsedModule.Name,aModule.Name],Use.Expr);
+          [UsedModule.Name,aModule.Name],PosEl);
+        end;
       end;
     end;
 
@@ -2112,7 +2403,7 @@ begin
       EmitProcedureHints(TPasProcedure(Decl))
     else
       begin
-      Usage:=FindPAElement(Decl);
+      Usage:=FindElement(Decl);
       if Usage=nil then
         begin
         // declaration was never used
@@ -2133,7 +2424,7 @@ begin
   {$IFDEF VerbosePasAnalyzer}
   writeln('TPasAnalyzer.EmitTypeHints ',GetElModName(El));
   {$ENDIF}
-  Usage:=FindPAElement(El);
+  Usage:=FindElement(El);
   if Usage=nil then
     begin
     // the whole type was never used
@@ -2175,7 +2466,7 @@ begin
   {$IFDEF VerbosePasAnalyzer}
   writeln('TPasAnalyzer.EmitVariableHints ',GetElModName(El));
   {$ENDIF}
-  Usage:=FindPAElement(El);
+  Usage:=FindElement(El);
   if Usage=nil then
     begin
     // not used
@@ -2222,6 +2513,7 @@ var
   ProcScope: TPasProcedureScope;
   PosEl: TPasElement;
   DeclProc, ImplProc: TPasProcedure;
+  FuncType: TPasFunctionType;
 begin
   {$IFDEF VerbosePasAnalyzer}
   writeln('TPasAnalyzer.EmitProcedureHints ',GetElModName(El));
@@ -2235,7 +2527,7 @@ begin
     ImplProc:=El
   else
     ImplProc:=ProcScope.ImplProc;
-  if FindNode(DeclProc)=nil then
+  if not PAElementExists(DeclProc) then
     begin
     // procedure never used
     if ProcScope.DeclarationProc=nil then
@@ -2266,7 +2558,7 @@ begin
     for i:=0 to Args.Count-1 do
       begin
       Arg:=TPasArgument(Args[i]);
-      Usage:=FindPAElement(Arg);
+      Usage:=FindElement(Arg);
       if (Usage=nil) or (Usage.Access=paiaNone) then
         begin
         // parameter was never used
@@ -2287,12 +2579,14 @@ begin
         end;
       end;
     // check result
-    if (El is TPasFunction) then
+    if (El.ProcType is TPasFunctionType) then
       begin
-      PosEl:=TPasFunction(El).FuncType.ResultEl;
-      if (ProcScope.ImplProc<>nil) and (TPasFunction(ProcScope.ImplProc).FuncType.ResultEl<>nil) then
+      FuncType:=TPasFunctionType(TPasProcedure(El).ProcType);
+      PosEl:=FuncType.ResultEl;
+      if (ProcScope.ImplProc<>nil)
+          and (TPasFunction(ProcScope.ImplProc).FuncType.ResultEl<>nil) then
         PosEl:=TPasFunction(ProcScope.ImplProc).FuncType.ResultEl;
-      Usage:=FindPAElement(TPasFunction(El).FuncType.ResultEl);
+      Usage:=FindElement(FuncType.ResultEl);
       if (Usage=nil) or (Usage.Access in [paiaNone,paiaRead]) then
         // result was never used
         EmitMessage(20170313214038,mtHint,nPAFunctionResultDoesNotSeemToBeSet,
@@ -2318,8 +2612,20 @@ var
 begin
   CreateTree;
   for m in TPAUseMode do
-    FChecked[m]:=TAVLTree.Create;
-  FOverrideLists:=TAVLTree.Create(@ComparePAOverrideLists);
+    FChecked[m]:=TPasAnalyzerKeySet.Create(
+      {$ifdef pas2js}
+      @PasElementToHashName
+      {$else}
+      @ComparePointer
+      {$endif}
+      ,nil
+      );
+  FOverrideLists:=TPasAnalyzerKeySet.Create(
+    {$ifdef pas2js}
+    @PAOverrideList_ElToHashName,@PasElementToHashName
+    {$else}
+    @ComparePAOverrideLists,@CompareElementWithPAOverrideList
+    {$endif});
 end;
 
 destructor TPasAnalyzer.Destroy;
@@ -2338,8 +2644,8 @@ procedure TPasAnalyzer.Clear;
 var
   m: TPAUseMode;
 begin
-  FOverrideLists.FreeAndClear;
-  FUsedElements.FreeAndClear;
+  FOverrideLists.FreeItems;
+  FUsedElements.FreeItems;
   for m in TPAUseMode do
     FChecked[m].Clear;
 end;
@@ -2402,17 +2708,6 @@ begin
   //EmitBlockHints(aModule.FinalizationSection);
 end;
 
-function TPasAnalyzer.FindElement(El: TPasElement): TPAElement;
-var
-  Node: TAVLTreeNode;
-begin
-  Node:=FindNode(El);
-  if Node=nil then
-    Result:=nil
-  else
-    Result:=TPAElement(Node.Data);
-end;
-
 function TPasAnalyzer.FindUsedElement(El: TPasElement): TPAElement;
 var
   ProcScope: TPasProcedureScope;
@@ -2434,7 +2729,7 @@ end;
 
 function TPasAnalyzer.IsTypeInfoUsed(El: TPasElement): boolean;
 begin
-  Result:=FChecked[paumTypeInfo].Find(El)<>nil;
+  Result:=FChecked[paumTypeInfo].ContainsItem(El);
 end;
 
 function TPasAnalyzer.IsModuleInternal(El: TPasElement): boolean;
@@ -2481,8 +2776,9 @@ begin
   Result:=false;
 end;
 
-procedure TPasAnalyzer.EmitMessage(Id: int64; MsgType: TMessageType;
-  MsgNumber: integer; Fmt: String; const Args: array of const;
+procedure TPasAnalyzer.EmitMessage(Id: TMaxPrecInt; MsgType: TMessageType;
+  MsgNumber: integer; Fmt: String;
+  const Args: array of {$ifdef pas2js}jsvalue{$else}const{$endif};
   PosEl: TPasElement);
 var
   Msg: TPAMessage;
@@ -2601,16 +2897,8 @@ begin
 end;
 
 function TPasAnalyzer.GetUsedElements: TFPList;
-var
-  Node: TAVLTreeNode;
 begin
-  Result:=TFPList.Create;
-  Node:=FUsedElements.FindLowest;
-  while Node<>nil do
-    begin
-    Result.Add(Node.Data);
-    Node:=FUsedElements.FindSuccessor(Node);
-    end;
+  Result:=FUsedElements.GetList;
 end;
 
 end.

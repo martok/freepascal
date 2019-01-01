@@ -32,7 +32,7 @@ type
   TSrcMarker = record
     Kind: TSrcMarkerKind;
     Filename: string;
-    Row: integer;
+    Row: cardinal;
     StartCol, EndCol: integer; // token start, end column
     Identifier: string;
     Next: PSrcMarker;
@@ -238,9 +238,8 @@ type
     Procedure TestInt_ForIn;
 
     // strings
-    Procedure TestChar_Ord;
-    Procedure TestChar_Chr;
-    Procedure TestString_SetLength;
+    Procedure TestChar_BuiltInProcs;
+    Procedure TestString_BuiltInProcs;
     Procedure TestString_Element;
     Procedure TestStringElement_MissingArgFail;
     Procedure TestStringElement_IndexNonIntFail;
@@ -254,7 +253,7 @@ type
     Procedure TestCharAssignStringFail;
     Procedure TestChar_ForIn;
 
-    // enums
+    // enums and sets
     Procedure TestEnums;
     Procedure TestEnumRangeFail;
     Procedure TestSets;
@@ -316,6 +315,7 @@ type
     Procedure TestIncDec;
     Procedure TestIncStringFail;
     Procedure TestTypeInfo;
+    Procedure TestTypeInfo_FailRTTIDisabled;
 
     // statements
     Procedure TestForLoop;
@@ -340,6 +340,7 @@ type
     Procedure TestStatementsRefs;
     Procedure TestRepeatUntilNonBoolFail;
     Procedure TestWhileDoNonBoolFail;
+    Procedure TestIfThen;
     Procedure TestIfThenNonBoolFail;
     Procedure TestIfAssignMissingSemicolonFail;
     Procedure TestForLoopVarNonVarFail;
@@ -391,6 +392,7 @@ type
     Procedure TestProcOverloadWithBaseTypes2;
     Procedure TestProcOverloadWithDefaultArgs;
     Procedure TestProcOverloadNearestHigherPrecision;
+    Procedure TestProcOverloadForLoopIntDouble;
     Procedure TestProcOverloadStringArgCount;
     Procedure TestProcCallLowPrecision;
     Procedure TestProcOverloadUntyped;
@@ -445,6 +447,25 @@ type
     Procedure TestProc_ImplicitCalls;
     Procedure TestProc_Absolute;
 
+    // anonymous procs
+    Procedure TestAnonymousProc_Assign;
+    Procedure TestAnonymousProc_AssignSemicolonFail;
+    Procedure TestAnonymousProc_Assign_ReferenceToMissingFail;
+    Procedure TestAnonymousProc_Assign_WrongParamListFail;
+    Procedure TestAnonymousProc_Arg;
+    Procedure TestAnonymousProc_ArgSemicolonFail;
+    Procedure TestAnonymousProc_EqualFail;
+    Procedure TestAnonymousProc_ConstFail;
+    Procedure TestAnonymousProc_Assembler;
+    Procedure TestAnonymousProc_NameFail;
+    Procedure TestAnonymousProc_StatementFail;
+    Procedure TestAnonymousProc_Typecast_ObjFPC;
+    Procedure TestAnonymousProc_Typecast_Delphi;
+    Procedure TestAnonymousProc_TypecastToResultFail;
+    Procedure TestAnonymousProc_With;
+    Procedure TestAnonymousProc_ExceptOn;
+    Procedure TestAnonymousProc_Nested;
+
     // record
     Procedure TestRecord;
     Procedure TestRecordVariant;
@@ -462,7 +483,27 @@ type
     Procedure TestRecord_Const_UntypedFail;
     Procedure TestRecord_Const_NestedRecord;
     Procedure TestRecord_Const_Variant;
-    Procedure TestRecord_VarExternal; // ToDo
+    Procedure TestRecord_VarExternal;
+    Procedure TestRecord_VarSelfFail;
+
+    // advanced record
+    Procedure TestAdvRecord;
+    Procedure TestAdvRecord_Private;
+    Procedure TestAdvRecord_StrictPrivate;
+    Procedure TestAdvRecord_VarConst;
+    Procedure TestAdvRecord_LocalForwardType;
+    Procedure TestAdvRecord_Constructor_NewInstance;
+    Procedure TestAdvRecord_ConstructorNoParamsFail;
+    Procedure TestAdvRecord_ClassConstructor;
+    Procedure TestAdvRecord_ClassConstructorParamsFail;
+    Procedure TestAdvRecord_NestedRecordType;
+    Procedure TestAdvRecord_NestedArgConstFail;
+    Procedure TestAdvRecord_Property;
+    Procedure TestAdvRecord_ClassProperty;
+    Procedure TestAdvRecord_PropertyDefault;
+    Procedure TestAdvRecord_RecordAsFuncResult;
+    Procedure TestAdvRecord_InheritedFail;
+    Procedure TestAdvRecord_ForInEnumerator;
 
     // class
     Procedure TestClass;
@@ -637,6 +678,7 @@ type
     Procedure TestPropertyArgs1;
     Procedure TestPropertyArgs2;
     Procedure TestPropertyArgsWithDefaultsFail;
+    Procedure TestPropertyArgs_StringConstDefault;
     Procedure TestProperty_Index;
     Procedure TestProperty_WrongTypeAsIndexFail;
     Procedure TestProperty_Option_ClassPropertyNonStatic;
@@ -916,9 +958,7 @@ procedure TCustomTestResolver.TearDown;
 {$IFDEF CheckPasTreeRefCount}
 var El: TPasElement;
 {$ENDIF}
-{$IF defined(VerbosePasResolver) or defined(VerbosePasResolverMem)}
 var i: Integer;
-{$ENDIF}
 begin
   FResolverMsgs.Clear;
   FResolverGoodMsgs.Clear;
@@ -1410,7 +1450,7 @@ var
           DeclEl:=TPasAliasType(El).DestType;
           ResolverEngine.UnmangleSourceLineNumber(DeclEl.SourceLinenumber,LabelLine,LabelCol);
           if (aLabel^.Filename=DeclEl.SourceFilename)
-          and (aLabel^.Row=LabelLine)
+          and (integer(aLabel^.Row)=LabelLine)
           and (aLabel^.StartCol<=LabelCol)
           and (aLabel^.EndCol>=LabelCol) then
             exit; // success
@@ -1490,8 +1530,8 @@ begin
     if (Marker<>nil) then
       begin
       if Item.SourcePos.Row<>Marker^.Row then continue;
-      if (Item.SourcePos.Column<Marker^.StartCol)
-          or (Item.SourcePos.Column>Marker^.EndCol) then continue;
+      if (integer(Item.SourcePos.Column)<Marker^.StartCol)
+          or (integer(Item.SourcePos.Column)>Marker^.EndCol) then continue;
       end;
     // found
     FResolverGoodMsgs.Add(Item);
@@ -1559,7 +1599,7 @@ begin
       if (Msg<>E.Message) and (Msg<>E.MsgPattern) and (Msg<>Full) then
         begin
         {$IFDEF VerbosePasResolver}
-        writeln('TCustomTestResolver.CheckResolverException E.MsgPattern={',E.MsgPattern,'}');
+        writeln('TCustomTestResolver.CheckResolverException E.MsgPattern={',E.MsgPattern,'} E.Message={',E.Message,'} Full={',Full,'}');
         {$ENDIF}
         AssertEquals('Expected message ('+IntToStr(MsgNumber)+')',
           '{'+Msg+'}','{'+E.Message+'} OR {'+E.MsgPattern+'} OR {'+Full+'}');
@@ -2213,6 +2253,11 @@ begin
       if TParamsExpr(El).Params[i].Parent<>El then
         E('TParamsExpr(El).Params[i].Parent='+GetObjName(TParamsExpr(El).Params[i].Parent)+'<>El');
     end
+  else if El is TProcedureExpr then
+    begin
+    if (TProcedureExpr(El).Proc<>nil) and (TProcedureExpr(El).Proc.Parent<>El) then
+      E('TProcedureExpr(El).Proc.Parent='+GetObjName(TProcedureExpr(El).Proc.Parent)+'<>El');
+    end
   else if El is TPasDeclarations then
     begin
     for i:=0 to TPasDeclarations(El).Declarations.Count-1 do
@@ -2725,9 +2770,18 @@ procedure TTestResolver.TestConstExternal;
 begin
   Parser.Options:=Parser.Options+[po_ExtConstWithoutExpr];
   StartProgram(false);
-  Add('const NaN: double; external name ''Global.Nan'';');
-  Add('begin');
+  Add([
+  'const',
+  '  PI: double; external name ''Global.PI'';',
+  '  Tau = 2*PI;',
+  '  TauD: double = 2*PI;',
+  'var',
+  '  d: double = PI;',
+  '  e: double = PI+Tau;',
+  'begin',
+  '  d:=pi+tau;']);
   ParseProgram;
+  // ToDo: fail on const Tau = 2*Var
 end;
 
 procedure TTestResolver.TestIntegerTypeCast;
@@ -2791,7 +2845,10 @@ begin
   '  c=double(currency(-123456890123456));',
   '  d=currency(-1);',
   '  e=currency(word(-1));',
+  'var',
   '  i: longint = 1;',
+  '  i64: int64;',
+  '  f: double;',
   'begin',
   '  a:=i;',
   '  a:=i+a;',
@@ -2807,6 +2864,14 @@ begin
   '  a:=i*a;',
   '  a:=a/i;',
   '  a:=i/a;',
+  '  a:=i64;',
+  '  a:=currency(i64);',
+  //'  i64:=a;', not allowed
+  '  i64:=int64(a);', // truncates a
+  '  a:=f;',
+  '  a:=currency(f);',
+  '  f:=a;',
+  '  f:=double(a);',
   '']);
   ParseProgram;
   CheckResolverUnexpectedHints;
@@ -3017,8 +3082,12 @@ begin
   '  MaxInt = +10;',
   'type',
   '  {#TMyInt}TMyInt = MinInt..MaxInt;',
-  'const a = low(TMyInt)+High(TMyInt);',
-  'begin']);
+  'const',
+  '  a = low(TMyInt)+High(TMyInt);',
+  'var',
+  '  i: TMyInt;',
+  'begin',
+  '  i:=low(i)+high(i);']);
   ParseProgram;
   CheckResolverUnexpectedHints;
 end;
@@ -3133,36 +3202,35 @@ begin
   ParseProgram;
 end;
 
-procedure TTestResolver.TestChar_Ord;
+procedure TTestResolver.TestChar_BuiltInProcs;
 begin
   StartProgram(false);
-  Add('var');
-  Add('  c: char;');
-  Add('  i: longint;');
-  Add('begin');
-  Add('  i:=ord(c);');
+  Add([
+  'var',
+  '  c: char;',
+  '  i: longint;',
+  'begin',
+  '  i:=ord(c);',
+  '  c:=chr(i);',
+  '  c:=pred(c);',
+  '  c:=succ(c);',
+  '  c:=low(c);',
+  '  c:=high(c);',
+  '']);
   ParseProgram;
 end;
 
-procedure TTestResolver.TestChar_Chr;
+procedure TTestResolver.TestString_BuiltInProcs;
 begin
   StartProgram(false);
-  Add('var');
-  Add('  c: char;');
-  Add('  i: longint;');
-  Add('begin');
-  Add('  c:=chr(i);');
-  ParseProgram;
-end;
-
-procedure TTestResolver.TestString_SetLength;
-begin
-  StartProgram(false);
-  Add('var');
-  Add('  s: string;');
-  Add('begin');
-  Add('  SetLength({#a_var}s,3);');
-  Add('  SetLength({#b_var}s,length({#c_read}s));');
+  Add([
+  'var',
+  '  s: string;',
+  'begin',
+  '  SetLength({#a_var}s,3);',
+  '  SetLength({#b_var}s,length({#c_read}s));',
+  '  s:=concat(''a'',s);',
+  '']);
   ParseProgram;
   CheckAccessMarkers;
 end;
@@ -3170,18 +3238,22 @@ end;
 procedure TTestResolver.TestString_Element;
 begin
   StartProgram(false);
-  Add('var');
-  Add('  s: string;');
-  Add('  c: char;');
-  Add('begin');
-  Add('  if s[1]=s then ;');
-  Add('  if s=s[2] then ;');
-  Add('  if s[3+4]=c then ;');
-  Add('  if c=s[5] then ;');
-  Add('  c:=s[6];');
-  Add('  s[7]:=c;');
-  Add('  s[8]:=''a'';');
-  Add('  s[9+1]:=''b'';');
+  Add([
+  'var',
+  '  s: string;',
+  '  c: char;',
+  'begin',
+  '  if s[1]=s then ;',
+  '  if s=s[2] then ;',
+  '  if s[3+4]=c then ;',
+  '  if c=s[5] then ;',
+  '  c:=s[6];',
+  '  s[7]:=c;',
+  '  s[8]:=''a'';',
+  '  s[9+1]:=''b'';',
+  '  s[10]:='''''''';',
+  '  s[11]:=^g;',
+  '  s[12]:=^H;']);
   ParseProgram;
 end;
 
@@ -3565,9 +3637,12 @@ begin
   Add('function {#A1}FuncA: TFlags;');
   Add('begin');
   Add('  Result:=[red];');
+  Add('  Include(Result,green);');
+  Add('  Exclude(Result,blue);');
   Add('end;');
   Add('function {#A2}FuncA(f: TFlags): TFlags;');
   Add('begin');
+  Add('  Include(f,green);');
   Add('  Result:=f;');
   Add('end;');
   Add('var');
@@ -3682,7 +3757,8 @@ begin
   '  aString:=str(f);',
   '  aString:=str(f:3);',
   '  str(f,aString);',
-  '  writestr(astring,f,i);']);
+  '  writestr(astring,f,i);',
+  '  val(aString,f,i);']);
   ParseProgram;
 end;
 
@@ -4272,9 +4348,12 @@ begin
   '  k:=''a'';',
   '  k:='''''''';',
   '  k:=j[1];',
+  '  k:=char(#10);',
   '  w:=k;',
   '  w:=#66;',
   '  w:=#6666;',
+  '  w:=widechar(#10);',
+  '  w:=widechar(#$E0000);',
   '']);
   ParseProgram;
 end;
@@ -4677,6 +4756,21 @@ begin
   ParseProgram;
 end;
 
+procedure TTestResolver.TestTypeInfo_FailRTTIDisabled;
+begin
+  StartProgram(false);
+  Add([
+  '{$modeswitch OmitRTTI}',
+  'type',
+  '  TObject = class',
+  '  end;',
+  'var o: TObject;',
+  'begin',
+  '  if typeinfo(o)=nil then ;',
+  '']);
+  CheckResolverException(sSymbolCannotBePublished,nSymbolCannotBePublished);
+end;
+
 procedure TTestResolver.TestForLoop;
 begin
   StartProgram(false);
@@ -5071,6 +5165,17 @@ begin
   Add('begin');
   Add('  while 3 do ;');
   CheckResolverException('Boolean expected, but Longint found',nXExpectedButYFound);
+end;
+
+procedure TTestResolver.TestIfThen;
+begin
+  StartProgram(false);
+  Add([
+  'var b: boolean;',
+  'begin',
+  '  if b then ;',
+  '  if b then else ;']);
+  ParseProgram;
 end;
 
 procedure TTestResolver.TestIfThenNonBoolFail;
@@ -5992,6 +6097,21 @@ begin
   'var w: word;',
   'begin',
   '  {@longint}DoIt(w);',
+  '']);
+  ParseProgram;
+end;
+
+procedure TTestResolver.TestProcOverloadForLoopIntDouble;
+begin
+  StartProgram(false);
+  Add([
+  'function {#int}Max(a,b: longint): longint; external; overload;',
+  'function {#double}Max(a,b: double): double; external; overload;',
+  'var',
+  '  i: longint;',
+  '  S: string;',
+  'begin',
+  '  for i:=0 to Max(length(s),1) do ;',
   '']);
   ParseProgram;
 end;
@@ -7063,6 +7183,342 @@ begin
   'begin']);
 end;
 
+procedure TTestResolver.TestAnonymousProc_Assign;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TFunc = reference to function(x: word): word;',
+  'var Func: TFunc;',
+  'procedure DoIt(a: word);',
+  'begin',
+  '  Func:=function(b:word): word',
+  '  begin',
+  '    Result:=a+b;',
+  '    exit(b);',
+  '    exit(Result);',
+  '  end;',// test semicolon
+  '  a:=3;',
+  'end;',
+  'begin',
+  '  Func:=function(c:word):word begin',
+  '    Result:=3+c;',
+  '    exit(c);',
+  '    exit(Result);',
+  '  end;']);
+  ParseProgram;
+end;
+
+procedure TTestResolver.TestAnonymousProc_AssignSemicolonFail;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TProc = reference to procedure;',
+  'procedure DoIt(a: word);',
+  'var p: TProc;',
+  'begin',
+  '  p:=procedure; begin end;',
+  '  a:=3;',
+  'end;',
+  'begin']);
+  CheckParserException('Expected "begin" at token ";" in file afile.pp at line 7 column 15',
+    nParserExpectTokenError);
+end;
+
+procedure TTestResolver.TestAnonymousProc_Assign_ReferenceToMissingFail;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TProc = procedure;',
+  'procedure DoIt;',
+  'var p: TProc;',
+  'begin',
+  '  p:=procedure(w: word) begin end;',
+  'end;',
+  'begin']);
+  CheckResolverException('procedural type modifier "reference to" mismatch',
+    nXModifierMismatchY);
+end;
+
+procedure TTestResolver.TestAnonymousProc_Assign_WrongParamListFail;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TProc = reference to procedure;',
+  'procedure DoIt;',
+  'var p: TProc;',
+  'begin',
+  '  p:=procedure(w: word) begin end;',
+  'end;',
+  'begin']);
+  CheckResolverException('Incompatible types, got 0 parameters, expected 1',
+    nIncompatibleTypesGotParametersExpected);
+end;
+
+procedure TTestResolver.TestAnonymousProc_Arg;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TProc = reference to procedure;',
+  '  TFunc = reference to function(x: word): word;',
+  'procedure DoMore(f,g: TProc);',
+  'begin',
+  'end;',
+  'procedure DoIt(f: TFunc);',
+  'begin',
+  '  DoIt(function(b:word): word',
+  '    begin',
+  '      Result:=1+b;',
+  '    end);',
+  '  DoMore(procedure begin end, procedure begin end);',
+  'end;',
+  'begin',
+  '  DoMore(procedure begin end, procedure begin end);',
+  '']);
+  ParseProgram;
+end;
+
+procedure TTestResolver.TestAnonymousProc_ArgSemicolonFail;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TProc = reference to procedure;',
+  'procedure DoIt(p: TProc);',
+  'begin',
+  'end;',
+  'begin',
+  '  DoIt(procedure begin end;);']);
+  CheckParserException('Expected "," at token ";" in file afile.pp at line 8 column 27',
+    nParserExpectTokenError);
+end;
+
+procedure TTestResolver.TestAnonymousProc_EqualFail;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TFunc = reference to function(x: word): word;',
+  'procedure DoIt(f: TFunc);',
+  'var w: word;',
+  'begin',
+  '  if w=function(b:word): word',
+  '    begin',
+  '      Result:=1+b;',
+  '    end then ;',
+  'end;',
+  'begin']);
+  CheckResolverException('Incompatible types: got "Procedure/Function" expected "Word"',nIncompatibleTypesGotExpected);
+end;
+
+procedure TTestResolver.TestAnonymousProc_ConstFail;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TProc = reference to procedure;',
+  'const',
+  '  p: TProc = procedure begin end;',
+  'begin']);
+  CheckParserException('Identifier expected at token "procedure" in file afile.pp at line 5 column 14',nParserExpectedIdentifier);
+end;
+
+procedure TTestResolver.TestAnonymousProc_Assembler;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TProc = reference to procedure;',
+  '  TProcB = reference to procedure cdecl;',
+  'procedure DoIt(p: TProc);',
+  'var b: TProcB;',
+  'begin',
+  '  p:=procedure assembler asm end;',
+  '  p:=procedure() assembler asm end;',
+  '  b:=procedure() cdecl assembler asm end;',
+  'end;',
+  'begin']);
+  ParseProgram;
+end;
+
+procedure TTestResolver.TestAnonymousProc_NameFail;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TProc = reference to procedure;',
+  'procedure DoIt(p: TProc);',
+  'begin',
+  '  p:=procedure Bla() begin end;',
+  'end;',
+  'begin']);
+  CheckParserException(SParserSyntaxError,nParserSyntaxError);
+end;
+
+procedure TTestResolver.TestAnonymousProc_StatementFail;
+begin
+  StartProgram(false);
+  Add([
+  'procedure DoIt;',
+  'begin',
+  '  procedure () begin end;',
+  'end;',
+  'begin']);
+  CheckParserException(SParserSyntaxError,nParserSyntaxError);
+end;
+
+procedure TTestResolver.TestAnonymousProc_Typecast_ObjFPC;
+begin
+  StartProgram(false);
+  Add([
+  '{$mode ObjFPC}',
+  'type',
+  '  TProc = reference to procedure(w: word);',
+  '  TArr = array of word;',
+  '  TFuncArr = reference to function: TArr;',
+  'procedure DoIt(p: TProc);',
+  'var',
+  '  w: word;',
+  '  a: TArr;',
+  'begin',
+  '  p:=TProc(procedure(b: smallint) begin end);',
+  '  a:=TFuncArr(function: TArr begin end)();',
+  '  w:=TFuncArr(function: TArr begin end)()[3];',
+  'end;',
+  'begin']);
+  ParseProgram;
+end;
+
+procedure TTestResolver.TestAnonymousProc_Typecast_Delphi;
+begin
+  StartProgram(false);
+  Add([
+  '{$mode Delphi}',
+  'type',
+  '  TProc = reference to procedure(w: word);',
+  '  TArr = array of word;',
+  '  TFuncArr = reference to function: TArr;',
+  'procedure DoIt(p: TProc);',
+  'var',
+  '  w: word;',
+  '  a: TArr;',
+  'begin',
+  '  p:=TProc(procedure(b: smallint) begin end);',
+  '  a:=TFuncArr(function: TArr begin end)();',
+  '  w:=TFuncArr(function: TArr begin end)()[3];',
+  'end;',
+  'begin']);
+  ParseProgram;
+end;
+
+procedure TTestResolver.TestAnonymousProc_TypecastToResultFail;
+begin
+  StartProgram(false);
+  Add([
+  'procedure DoIt;',
+  'var i: longint;',
+  'begin',
+  '  i:=longint(function(b: byte): byte begin end);',
+  'end;',
+  'begin']);
+  CheckResolverException('Illegal type conversion: "Procedure/Function" to "Longint"',
+    nIllegalTypeConversionTo);
+end;
+
+procedure TTestResolver.TestAnonymousProc_With;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TProc = reference to procedure(w: word);',
+  '  TObject = class end;',
+  '  TBird = class',
+  '    {#bool}b: boolean;',
+  '  end;',
+  'procedure DoIt({#i}i: longint);',
+  'var',
+  '  {#p}p: TProc;',
+  '  {#bird}bird: TBird;',
+  'begin',
+  '  with {@bird}bird do',
+  '    {@p}p:=procedure({#w}w: word)',
+  '      begin',
+  '        {@bool}b:=true;',
+  '        {@bool}b:=({@w}w+{@i}i)>2;',
+  '      end;',
+  'end;',
+  'begin']);
+  ParseProgram;
+end;
+
+procedure TTestResolver.TestAnonymousProc_ExceptOn;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TProc = reference to procedure;',
+  '  TObject = class end;',
+  '  Exception = class',
+  '    {#bool}b: boolean;',
+  '  end;',
+  'procedure DoIt;',
+  'var',
+  '  {#p}p: TProc;',
+  'begin',
+  '  try',
+  '  except',
+  '    on {#E}E: Exception do',
+  '    {@p}p:=procedure',
+  '      begin',
+  '        {@E}E.{@bool}b:=true;',
+  '      end;',
+  '  end;',
+  'end;',
+  'begin']);
+  ParseProgram;
+end;
+
+procedure TTestResolver.TestAnonymousProc_Nested;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TProc = reference to procedure;',
+  '  TObject = class',
+  '    i: byte;',
+  '    procedure DoIt;',
+  '  end;',
+  'procedure TObject.DoIt;',
+  'var',
+  '  p: TProc;',
+  '  procedure Sub;',
+  '  begin',
+  '    p:=procedure',
+  '      begin',
+  '        i:=3;',
+  '        Self.i:=4;',
+  '        p:=procedure',
+  '            procedure SubSub;',
+  '            begin',
+  '              i:=13;',
+  '              Self.i:=14;',
+  '            end;',
+  '          begin',
+  '            i:=13;',
+  '            Self.i:=14;',
+  '          end;',
+  '      end;',
+  '  end;',
+  'begin',
+  'end;',
+  'begin']);
+  ParseProgram;
+end;
+
 procedure TTestResolver.TestRecord;
 begin
   StartProgram(false);
@@ -7238,6 +7694,13 @@ begin
   'type',
   '  TPoint = record x, y: longint; end;',
   'const r: TPoint = (x:1; y:2);',
+  'type',
+  '  TPasSourcePos = Record',
+  '    FileName: String;',
+  '    Row, Column: LongWord;',
+  '  end;',
+  'const',
+  '  DefPasSourcePos: TPasSourcePos = (Filename:''''; Row:0; Column:0);',
   'begin',
   '']);
   ParseProgram;
@@ -7344,6 +7807,509 @@ begin
   '    Id: longint external name ''$Id'';',
   '  end;',
   'begin']);
+  ParseProgram;
+end;
+
+procedure TTestResolver.TestRecord_VarSelfFail;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TRec = record',
+  '    r: Trec;',
+  '  end;',
+  'begin']);
+  CheckResolverException('type "TRec" is not yet completely defined',nTypeXIsNotYetCompletelyDefined);
+end;
+
+procedure TTestResolver.TestAdvRecord;
+begin
+  StartProgram(false);
+  Add([
+  '{$modeswitch advancedrecords}',
+  'type',
+  '  TRec = record',
+  '    procedure DoIt;',
+  '  end;',
+  'procedure TRec.DoIt;',
+  'begin',
+  'end;',
+  'begin']);
+  ParseProgram;
+end;
+
+procedure TTestResolver.TestAdvRecord_Private;
+begin
+  StartProgram(false);
+  Add([
+  '{$modeswitch advancedrecords}',
+  'type',
+  '  TRec = record',
+  '  private',
+  '    a: byte;',
+  '  public',
+  '    b: byte;',
+  '  end;',
+  'var',
+  '  r: TRec;',
+  'begin',
+  '  r.a:=r.b;']);
+  ParseProgram;
+end;
+
+procedure TTestResolver.TestAdvRecord_StrictPrivate;
+begin
+  StartProgram(false);
+  Add([
+  '{$modeswitch advancedrecords}',
+  'type',
+  '  TRec = record',
+  '  strict private',
+  '    A: word;',
+  '  end;',
+  'var',
+  '  r: TRec;',
+  'begin',
+  '  r.a:=r.a;']);
+  CheckResolverException('Can''t access strict private member A',nCantAccessPrivateMember);
+end;
+
+procedure TTestResolver.TestAdvRecord_VarConst;
+begin
+  StartProgram(false);
+  Add([
+  '{$modeswitch advancedrecords}',
+  'type',
+  '  TRec = record',
+  '  type TInt = word;',
+  '  const',
+  '    C1 = 3;',
+  '    C2: TInt = 4;',
+  '  var',
+  '    V1: TInt;',
+  '    V2: TInt;',
+  '  class var',
+  '    VC: TInt;',
+  '    CA: array[1..C1] of TInt;',
+  '  procedure DoIt;',
+  '  end;',
+  'procedure TRec.DoIt;',
+  'begin',
+  '  C2:=Self.C2;',
+  '  V1:=VC;',
+  '  Self.V1:=Self.VC;',
+  '  VC:=V1;',
+  '  Self.VC:=Self.V1;',
+  'end;',
+  'var',
+  '  r: TRec;',
+  'begin',
+  '  trec.C2:=trec.C2;',
+  '  r.V1:=r.VC;',
+  '  r.V1:=trec.VC;',
+  '  r.VC:=r.V1;',
+  '  trec.VC:=trec.c1;',
+  '']);
+  ParseProgram;
+end;
+
+procedure TTestResolver.TestAdvRecord_LocalForwardType;
+begin
+  StartProgram(false);
+  Add([
+  '{$modeswitch advancedrecords}',
+  'type',
+  '  TRec = record',
+  '  type',
+  '    PInt = ^TInt;',
+  '    TInt = word;',
+  '  var i: PInt;',
+  '  end;',
+  'var',
+  '  r: TRec;',
+  'begin',
+  '']);
+  ParseProgram;
+end;
+
+procedure TTestResolver.TestAdvRecord_Constructor_NewInstance;
+var
+  aMarker: PSrcMarker;
+  Elements: TFPList;
+  ActualNewInstance: Boolean;
+  i: Integer;
+  El: TPasElement;
+  Ref: TResolvedReference;
+begin
+  StartProgram(false);
+  Add([
+  '{$modeswitch advancedrecords}',
+  'type',
+  '  TRec = record',
+  '    constructor Create(w: word);',
+  '    class function DoSome: TRec;',
+  '  end;',
+  'constructor TRec.Create(w: word);',
+  'begin',
+  '  {#a}Create(1); // normal call',
+  '  TRec.{#b}Create(2); // new instance',
+  'end;',
+  'class function TRec.DoSome: TRec;',
+  'begin',
+  '  Result:={#c}Create(3); // new instance',
+  'end;',
+  'var',
+  '  r: TRec;',
+  'begin',
+  '  TRec.{#p}Create(4); // new object',
+  '  r:=TRec.{#q}Create(5); // new object',
+  '  r.{#r}Create(6); // normal call',
+  '']);
+  ParseProgram;
+  aMarker:=FirstSrcMarker;
+  while aMarker<>nil do
+    begin
+    //writeln('TTestResolver.TestAdvRecord_Constructor_NewInstance ',aMarker^.Identifier,' ',aMarker^.StartCol,' ',aMarker^.EndCol);
+    Elements:=FindElementsAt(aMarker);
+    try
+      ActualNewInstance:=false;
+      for i:=0 to Elements.Count-1 do
+        begin
+        El:=TPasElement(Elements[i]);
+        //writeln('TTestResolver.TestAdvRecord_Constructor_NewInstance ',aMarker^.Identifier,' ',i,'/',Elements.Count,' El=',GetObjName(El),' ',GetObjName(El.CustomData));
+        if not (El.CustomData is TResolvedReference) then continue;
+        Ref:=TResolvedReference(El.CustomData);
+        if not (Ref.Declaration is TPasProcedure) then continue;
+        //writeln('TTestResolver.TestAdvRecord_Constructor_NewInstance ',GetObjName(Ref.Declaration),' rrfNewInstance=',rrfNewInstance in Ref.Flags);
+        if (Ref.Declaration is TPasConstructor) then
+          ActualNewInstance:=rrfNewInstance in Ref.Flags;
+        if rrfImplicitCallWithoutParams in Ref.Flags then
+          RaiseErrorAtSrcMarker('unexpected implicit call at "#'+aMarker^.Identifier+' ref"',aMarker);
+        break;
+        end;
+      case aMarker^.Identifier of
+      'a','r':// should be normal call
+        if ActualNewInstance then
+          RaiseErrorAtSrcMarker('expected normal call at "#'+aMarker^.Identifier+', but got newinstance"',aMarker);
+      else // should be newinstance
+        if not ActualNewInstance then
+          RaiseErrorAtSrcMarker('expected newinstance at "#'+aMarker^.Identifier+', but got normal call"',aMarker);
+      end;
+    finally
+      Elements.Free;
+    end;
+    aMarker:=aMarker^.Next;
+    end;
+end;
+
+procedure TTestResolver.TestAdvRecord_ConstructorNoParamsFail;
+begin
+  StartProgram(false);
+  Add([
+  '{$modeswitch advancedrecords}',
+  'type',
+  '  TRec = record',
+  '    constructor Create(w: word = 3);',
+  '  end;',
+  'constructor TRec.Create(w: word);',
+  'begin',
+  'end;',
+  'begin',
+  '']);
+  CheckResolverException(sParameterlessConstructorsNotAllowedInRecords,
+    nParameterlessConstructorsNotAllowedInRecords);
+end;
+
+procedure TTestResolver.TestAdvRecord_ClassConstructor;
+begin
+  StartProgram(false);
+  Add([
+  '{$modeswitch advancedrecords}',
+  'type',
+  '  TRec = record',
+  '    class procedure {#a}Create;',
+  '    class constructor Create;',
+  '  end;',
+  'class constructor TRec.Create;',
+  'begin',
+  'end;',
+  'class procedure TRec.Create;',
+  'begin',
+  'end;',
+  'begin',
+  '  TRec.{@a}Create;',
+  '']);
+  ParseProgram;
+end;
+
+procedure TTestResolver.TestAdvRecord_ClassConstructorParamsFail;
+begin
+  StartProgram(false);
+  Add([
+  '{$modeswitch advancedrecords}',
+  'type',
+  '  TRec = record',
+  '    class constructor Create(w: word);',
+  '  end;',
+  'class constructor TRec.Create(w: word);',
+  'begin',
+  'end;',
+  'begin',
+  '']);
+  CheckResolverException('class constructor cannot have parameters',nXCannotHaveParameters);
+end;
+
+procedure TTestResolver.TestAdvRecord_NestedRecordType;
+begin
+  StartProgram(false);
+  Add([
+  '{$modeswitch advancedrecords}',
+  'type',
+  '  TRec = record',
+  '  type',
+  '    TSub = record',
+  '      x: word;',
+  '      class var y: word;',
+  '      procedure DoSub;',
+  '    end;',
+  '  var',
+  '    Sub: TSub;',
+  '    procedure DoIt(const r: TRec);',
+  '  end;',
+  'procedure TRec.TSub.DoSub;',
+  'begin',
+  '  x:=3;',
+  'end;',
+  'procedure TRec.DoIt(const r: TRec);',
+  'begin',
+  '  Sub.x:=4;',
+  '  r.Sub.y:=Sub.x;', // class var y is writable, even though r.Sub is not
+  'end;',
+  'var r: TRec;',
+  'begin',
+  '  r.sub.x:=4;',
+  '']);
+  ParseProgram;
+end;
+
+procedure TTestResolver.TestAdvRecord_NestedArgConstFail;
+begin
+  StartProgram(false);
+  Add([
+  '{$modeswitch advancedrecords}',
+  'type',
+  '  TRec = record',
+  '  type',
+  '    TSub = record',
+  '      x: word;',
+  '    end;',
+  '  var',
+  '    Sub: TSub;',
+  '    procedure DoIt(const r: TRec);',
+  '  end;',
+  'procedure TRec.DoIt(const r: TRec);',
+  'begin',
+  '  r.Sub.x:=4;',
+  'end;',
+  'begin',
+  '']);
+  CheckResolverException(sVariableIdentifierExpected,nVariableIdentifierExpected);
+end;
+
+procedure TTestResolver.TestAdvRecord_Property;
+begin
+  StartProgram(false);
+  Add([
+  '{$modeswitch advancedrecords}',
+  'type',
+  '  TRec = record',
+  '  private',
+  '    FSize: word;',
+  '    function SizeStored: boolean;',
+  '    function GetWidth: word;',
+  '    procedure SetWidth(Value: word);',
+  '  public',
+  '    property Size: word read FSize write FSize stored SizeStored default 3;',
+  '    property Width: word read GetWidth write SetWidth;',
+  '  end;',
+  'function TRec.SizeStored: boolean;',
+  'begin',
+  'end;',
+  'function TRec.GetWidth: word;',
+  'begin',
+  '  Result:=FSize;',
+  'end;',
+  'procedure TRec.SetWidth(Value: word);',
+  'begin',
+  '  FSize:=Value;',
+  'end;',
+  'var r: TRec;',
+  'begin',
+  '  r.Size:=r.Size;',
+  '  r.Width:=r.Width;',
+  '']);
+  ParseProgram;
+end;
+
+procedure TTestResolver.TestAdvRecord_ClassProperty;
+begin
+  StartProgram(false);
+  Add([
+  '{$modeswitch advancedrecords}',
+  'type',
+  '  TRec = record',
+  '  private',
+  '    class var FSize: word;',
+  '    class function GetWidth: word; static;',
+  '    class procedure SetWidth(Value: word); static;',
+  '  public',
+  '    class property Size: word read FSize write FSize;',
+  '    class property Width: word read GetWidth write SetWidth;',
+  '  end;',
+  'class function TRec.GetWidth: word;',
+  'begin',
+  '  Result:=FSize;',
+  'end;',
+  'class procedure TRec.SetWidth(Value: word);',
+  'begin',
+  '  FSize:=Value;',
+  'end;',
+  'begin',
+  '  TRec.Size:=TRec.Size;',
+  '  TRec.Width:=TRec.Width;',
+  '']);
+  ParseProgram;
+end;
+
+procedure TTestResolver.TestAdvRecord_PropertyDefault;
+begin
+  StartProgram(false);
+  Add([
+  '{$modeswitch advancedrecords}',
+  'type',
+  '  TRec = record',
+  '  private',
+  '    function GetItems(Index: word): word;',
+  '    procedure SetItems(Index: word; Value: word);',
+  '  public',
+  '    property Items[Index: word]: word read GetItems write SetItems; default;',
+  '  end;',
+  '  TGlob = record',
+  '  private',
+  '    class function GetSizes(Index: word): word; static;',
+  '    class procedure SetSizes(Index: word; Value: word); static;',
+  '  public',
+  '    class property Sizes[Index: word]: word read GetSizes write SetSizes; default;',
+  '  end;',
+  'function TRec.GetItems(Index: word): word;',
+  'begin',
+  'end;',
+  'procedure TRec.SetItems(Index: word; Value: word);',
+  'begin',
+  'end;',
+  'class function TGlob.GetSizes(Index: word): word;',
+  'begin',
+  'end;',
+  'class procedure TGlob.SetSizes(Index: word; Value: word);',
+  'begin',
+  'end;',
+  'var',
+  '  r: TRec;',
+  '  g: TGlob;',
+  'begin',
+  '  r[1]:=r[2];',
+  '  TGlob[1]:=TGlob[2];',
+  '']);
+  ParseProgram;
+end;
+
+procedure TTestResolver.TestAdvRecord_RecordAsFuncResult;
+begin
+  StartProgram(false);
+  Add([
+  '{$modeswitch advancedrecords}',
+  'type',
+  '  {#A}TRec = record',
+  '     {#A_i}i: longint;',
+  '     class function {#A_CreateA}Create: TRec;',
+  '     class function {#A_CreateB}Create(i: longint): TRec;',
+  '  end;',
+  'function {#F}F: TRec;',
+  'begin',
+  '  Result:=default(TRec);',
+  'end;',
+  'class function TRec.Create: TRec;',
+  'begin',
+  '  Result:=default(TRec);',
+  'end;',
+  'class function TRec.Create(i: longint): TRec;',
+  'begin',
+  '  Result:=default(TRec);',
+  '  Result.i:=i;',
+  'end;',
+  'var',
+  '  {#v}{=A}v: TRec;',
+  'begin',
+  '  {@v}v:={@F}F;',
+  '  {@v}v:={@F}F();',
+  '  if {@v}v={@F}F then ;',
+  '  if {@v}v={@F}F() then ;',
+  '  {@v}v:={@A}TRec.{@A_CreateA}Create;',
+  '  {@v}v:={@A}TRec.{@A_CreateA}Create();',
+  '  {@v}v:={@A}TRec.{@A_CreateB}Create(3);',
+  '  {@A}TRec.{@A_CreateA}Create . {@A_i}i:=4;',
+  '  {@A}TRec.{@A_CreateA}Create().{@A_i}i:=5;',
+  '  {@A}TRec.{@A_CreateB}Create(3).{@A_i}i:=6;']);
+  ParseProgram;
+end;
+
+procedure TTestResolver.TestAdvRecord_InheritedFail;
+begin
+  StartProgram(false);
+  Add([
+  '{$modeswitch advancedrecords}',
+  'type',
+  '  TRec = record',
+  '    procedure DoIt;',
+  '  end;',
+  'procedure TRec.DoIt;',
+  'begin',
+  '  inherited;',
+  'end;',
+  'begin',
+  '']);
+  CheckResolverException('The use of "inherited" is not allowed in a record',
+    nTheUseOfXisNotAllowedInARecord);
+end;
+
+procedure TTestResolver.TestAdvRecord_ForInEnumerator;
+begin
+  StartProgram(false);
+  Add([
+  '{$modeswitch advancedrecords}',
+  'type',
+  '  TObject = class end;',
+  '  TItem = TObject;',
+  '  TEnumerator = class',
+  '    FCurrent: TItem;',
+  '    property Current: TItem read FCurrent;',
+  '    function MoveNext: boolean;',
+  '  end;',
+  '  TBird = record',
+  '    function GetEnumerator: TEnumerator;',
+  '  end;',
+  'function TEnumerator.MoveNext: boolean;',
+  'begin',
+  'end;',
+  'function TBird.GetEnumerator: TEnumerator;',
+  'begin',
+  'end;',
+  'var',
+  '  b: TBird;',
+  '  i: TItem;',
+  '  {#i2}i2: TItem;',
+  'begin',
+  '  for i in b do {@i2}i2:=i;']);
   ParseProgram;
 end;
 
@@ -8565,42 +9531,43 @@ end;
 procedure TTestResolver.TestClassAsFuncResult;
 begin
   StartProgram(false);
-  Add('type');
-  Add('  {#TOBJ}TObject = class');
-  Add('  end;');
-  Add('  {#A}TClassA = class');
-  Add('     {#A_i}i: longint;');
-  Add('     constructor {#A_CreateA}Create;');
-  Add('     constructor {#A_CreateB}Create(i: longint);');
-  Add('  end;');
-  Add('function {#F}F: TClassA;');
-  Add('begin');
-  Add('  Result:=nil;');
-  Add('end;');
-  Add('constructor TClassA.Create;');
-  Add('begin');
-  Add('end;');
-  Add('constructor TClassA.Create(i: longint);');
-  Add('begin');
-  Add('end;');
-  Add('var');
-  Add('  {#o}{=TOBJ}o: TObject;');
-  Add('  {#v}{=A}v: TClassA;');
-  Add('begin');
-  Add('  {@o}o:={@F}F;');
-  Add('  {@o}o:={@F}F();');
-  Add('  {@v}v:={@F}F;');
-  Add('  {@v}v:={@F}F();');
-  Add('  if {@o}o={@F}F then ;');
-  Add('  if {@o}o={@F}F() then ;');
-  Add('  if {@v}v={@F}F then ;');
-  Add('  if {@v}v={@F}F() then ;');
-  Add('  {@v}v:={@A}TClassA.{@A_CreateA}Create;');
-  Add('  {@v}v:={@A}TClassA.{@A_CreateA}Create();');
-  Add('  {@v}v:={@A}TClassA.{@A_CreateB}Create(3);');
-  Add('  {@A}TClassA.{@A_CreateA}Create.{@A_i}i:=3;');
-  Add('  {@A}TClassA.{@A_CreateA}Create().{@A_i}i:=3;');
-  Add('  {@A}TClassA.{@A_CreateB}Create(3).{@A_i}i:=3;');
+  Add([
+  'type',
+  '  {#TOBJ}TObject = class',
+  '  end;',
+  '  {#A}TClassA = class',
+  '     {#A_i}i: longint;',
+  '     constructor {#A_CreateA}Create;',
+  '     constructor {#A_CreateB}Create(i: longint);',
+  '  end;',
+  'function {#F}F: TClassA;',
+  'begin',
+  '  Result:=nil;',
+  'end;',
+  'constructor TClassA.Create;',
+  'begin',
+  'end;',
+  'constructor TClassA.Create(i: longint);',
+  'begin',
+  'end;',
+  'var',
+  '  {#o}{=TOBJ}o: TObject;',
+  '  {#v}{=A}v: TClassA;',
+  'begin',
+  '  {@o}o:={@F}F;',
+  '  {@o}o:={@F}F();',
+  '  {@v}v:={@F}F;',
+  '  {@v}v:={@F}F();',
+  '  if {@o}o={@F}F then ;',
+  '  if {@o}o={@F}F() then ;',
+  '  if {@v}v={@F}F then ;',
+  '  if {@v}v={@F}F() then ;',
+  '  {@v}v:={@A}TClassA.{@A_CreateA}Create;',
+  '  {@v}v:={@A}TClassA.{@A_CreateA}Create();',
+  '  {@v}v:={@A}TClassA.{@A_CreateB}Create(3);',
+  '  {@A}TClassA.{@A_CreateA}Create.{@A_i}i:=3;',
+  '  {@A}TClassA.{@A_CreateA}Create().{@A_i}i:=3;',
+  '  {@A}TClassA.{@A_CreateB}Create(3).{@A_i}i:=3;']);
   ParseProgram;
 end;
 
@@ -8948,26 +9915,27 @@ var
   ActualNewInstance, ActualImplicitCallWithoutParams: Boolean;
 begin
   StartProgram(false);
-  Add('type');
-  Add('  TObject = class');
-  Add('    constructor Create;');
-  Add('    class function DoSome: TObject;');
-  Add('  end;');
-  Add('constructor TObject.Create;');
-  Add('begin');
-  Add('  {#a}Create; // normal call');
-  Add('  TObject.{#b}Create; // new instance');
-  Add('end;');
-  Add('class function TObject.DoSome: TObject;');
-  Add('begin');
-  Add('  Result:={#c}Create; // new instance');
-  Add('end;');
-  Add('var');
-  Add('  o: TObject;');
-  Add('begin');
-  Add('  TObject.{#p}Create; // new object');
-  Add('  o:=TObject.{#q}Create; // new object');
-  Add('  o.{#r}Create; // normal call');
+  Add([
+  'type',
+  '  TObject = class',
+  '    constructor Create;',
+  '    class function DoSome: TObject;',
+  '  end;',
+  'constructor TObject.Create;',
+  'begin',
+  '  {#a}Create; // normal call',
+  '  TObject.{#b}Create; // new instance',
+  'end;',
+  'class function TObject.DoSome: TObject;',
+  'begin',
+  '  Result:={#c}Create; // new instance',
+  'end;',
+  'var',
+  '  o: TObject;',
+  'begin',
+  '  TObject.{#p}Create; // new object',
+  '  o:=TObject.{#q}Create; // new object',
+  '  o.{#r}Create; // normal call']);
   ParseProgram;
   aMarker:=FirstSrcMarker;
   while aMarker<>nil do
@@ -10869,6 +11837,20 @@ begin
     PParser.nParserPropertyArgumentsCanNotHaveDefaultValues);
 end;
 
+procedure TTestResolver.TestPropertyArgs_StringConstDefault;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TObject = class',
+  '    function GetItems(const s: string): byte; virtual; abstract;',
+  '    procedure SetItems(const s: string; b: byte); virtual; abstract;',
+  '    property Items[s: string]: byte read GetItems write SetItems;',
+  '  end;',
+  'begin']);
+  ParseProgram;
+end;
+
 procedure TTestResolver.TestProperty_Index;
 begin
   StartProgram(false);
@@ -12323,11 +13305,11 @@ begin
   '  TArrStr = array of string;',
   'const',
   '  Ints: TArrInt = (1,2,3);',
-  '  Names: array of string = (''a'',''foo'');',
   '  Aliases: TarrStr = (''foo'',''b'');',
   '  OneInt: TArrInt = (7);',
   '  OneInt2: array of integer = (7);',
   '  Chars: array of char = ''aoc'';',
+  '  Names: array of string = (''a'',''foo'');',
   '  NameCount = low(Names)+high(Names)+length(Names);',
   'procedure DoIt(Ints: TArrInt);',
   'begin',
@@ -12365,11 +13347,11 @@ begin
   '  TArrOfSet = array of TSetOfEnum;',
   'const',
   '  Ints: TArrInt = {#ints_array}[1,2,1];',
-  '  Names: array of string = {#names_array}[''a'',''a''];',
   '  Aliases: TarrStr = {#aliases_array}[''foo'',''b'',''b''];',
   '  OneInt: TArrInt = {#oneint_array}[7];',
   '  TwoInt: array of integer = {#twoint1_array}[7]+{#twoint2_array}[8];',
   '  Chars: array of char = ''aoc'';',
+  '  Names: array of string = {#names_array}[''a'',''a''];',
   '  NameCount = low(Names)+high(Names)+length(Names);',
   'procedure {#DoArrOfSet}DoIt(const s: TArrOfSet); overload; begin end;',
   'procedure {#DoArrOfArrInt}DoIt(const a: TArrInt2); overload; begin end;',
@@ -13906,34 +14888,41 @@ end;
 procedure TTestResolver.TestPointer;
 begin
   StartProgram(false);
-  Add('type');
-  Add('  TObject = class end;');
-  Add('  TClass = class of TObject;');
-  Add('  TMyPtr = pointer;');
-  Add('  TArrInt = array of longint;');
-  Add('  TFunc = function: longint;');
-  Add('procedure DoIt; begin end;');
-  Add('var');
-  Add('  p: TMyPtr;');
-  Add('  Obj: TObject;');
-  Add('  Cl: TClass;');
-  Add('  a: tarrint;');
-  Add('  f: TFunc;');
-  Add('begin');
-  Add('  p:=nil;');
-  Add('  if p=nil then;');
-  Add('  if nil=p then;');
-  Add('  if Assigned(p) then;');
-  Add('  p:=obj;');
-  Add('  p:=cl;');
-  Add('  p:=a;');
-  Add('  p:=Pointer(f);');
-  Add('  p:=@DoIt;');
-  Add('  p:=Pointer(@DoIt);');
-  Add('  obj:=TObject(p);');
-  Add('  cl:=TClass(p);');
-  Add('  a:=TArrInt(p);');
-  Add('  p:=Pointer(a);');
+  Add([
+  'type',
+  '  TObject = class end;',
+  '  TClass = class of TObject;',
+  '  TMyPtr = pointer;',
+  '  TArrInt = array of longint;',
+  '  TFunc = function: longint;',
+  'procedure DoIt; begin end;',
+  'var',
+  '  p: TMyPtr;',
+  '  Obj: TObject;',
+  '  Cl: TClass;',
+  '  a: tarrint;',
+  '  f: TFunc;',
+  '  s: string;',
+  '  u: unicodestring;',
+  'begin',
+  '  p:=nil;',
+  '  if p=nil then;',
+  '  if nil=p then;',
+  '  if Assigned(p) then;',
+  '  p:=obj;',
+  '  p:=cl;',
+  '  p:=a;',
+  '  p:=Pointer(f);',
+  '  p:=@DoIt;',
+  '  p:=Pointer(@DoIt);',
+  '  obj:=TObject(p);',
+  '  cl:=TClass(p);',
+  '  a:=TArrInt(p);',
+  '  p:=Pointer(a);',
+  '  p:=Pointer(s);',
+  '  s:=String(p);',
+  '  p:=pointer(u);',
+  '  u:=UnicodeString(p);']);
   ParseProgram;
 end;
 
@@ -14170,12 +15159,15 @@ begin
   '  r: TRec;',
   '  p: PRec;',
   '  i: longint;',
+  '  Ptr: pointer;',
   'begin',
   '  p:=@r;',
   '  i:=p^.x;',
   '  p^.x:=i;',
   '  if i=p^.x then;',
   '  if p^.x=i then;',
+  '  ptr:=p;',
+  '  p:=PRec(ptr);',
   '']);
   ParseProgram;
 end;

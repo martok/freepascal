@@ -112,7 +112,9 @@ implementation
                  { ... at the place we are looking for }
                  references_equal(tabstractnormalvarsym(tloadnode(n).symtableentry).localloc.reference,rr^.old^) and
                  { its address cannot have escaped the current routine }
-                 not(tabstractvarsym(tloadnode(n).symtableentry).addr_taken) then
+                 not(tabstractvarsym(tloadnode(n).symtableentry).addr_taken) and
+                 { it is not accessed in nested procedures }
+                 not(tabstractvarsym(tloadnode(n).symtableentry).different_scope) then
                 begin
                   { relocate variable }
                   tcgloadnode(n).changereflocation(rr^.new^);
@@ -418,6 +420,7 @@ implementation
         href : treference;
         newsize : tcgsize;
         vd : tdef;
+        alignment: longint;
         indirect : boolean;
         name : TSymStr;
       begin
@@ -491,8 +494,8 @@ implementation
                          reference_reset_symbol(location.reference,current_asmdata.WeakRefAsmSymbol(gvs.mangledname,AT_DATA),0,location.reference.alignment,[])
                      end
                    else
-                     location:=gvs.localloc;
-                 end;
+                      location:=gvs.localloc;
+                  end;
 
                 { make const a LOC_CREFERENCE }
                 if (gvs.varspez=vs_const) and
@@ -527,7 +530,10 @@ implementation
                     { assume packed records may always be unaligned }
                     if not(resultdef.typ in [recorddef,objectdef]) or
                        (tabstractrecordsymtable(tabstractrecorddef(resultdef).symtable).usefieldalignment<>1) then
-                      location_reset_ref(location,LOC_REFERENCE,newsize,resultdef.alignment,[])
+                      begin
+                        alignment:=min(min(min(resultdef.alignment,current_settings.alignment.localalignmax),current_settings.alignment.constalignmax),current_settings.alignment.varalignmax);
+                        location_reset_ref(location,LOC_REFERENCE,newsize,alignment,[]);
+                      end
                     else
                       location_reset_ref(location,LOC_REFERENCE,newsize,1,[]);
                     hlcg.reference_reset_base(location.reference,voidpointertype,hregister,0,ctempposinvalid,location.reference.alignment,[]);

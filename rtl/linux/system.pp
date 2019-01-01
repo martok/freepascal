@@ -45,13 +45,26 @@ const
 function get_cmdline:Pchar; deprecated 'use paramstr' ;
 property cmdline:Pchar read get_cmdline;
 
-{$if defined(CPUARM) or defined(CPUM68K) or (defined(CPUSPARC) and defined(VER2_6))}
+{$if defined(CPURISCV32) or defined(CPURISCV64) or defined(CPUARM) or defined(CPUM68K) or (defined(CPUSPARC) and defined(VER2_6))}
+{$define FPC_LOAD_SOFTFPU}
+{$endif defined(CPURISCV32) or defined(CPURISCV64) or defined(CPUARM) or defined(CPUM68K) or (defined(CPUSPARC) and defined(VER2_6))}
 
+{$ifdef FPC_SOFT_FPUX80}
+{$define FPC_SOFTFLOAT_FLOATX80}
+{$define LOAD_SOFTFPU}
+{$endif}
+
+{$ifdef FPC_SOFT_FPU128}
+{$define FPC_SOFTFLOAT_FLOAT128}
+{$define FPC_LOAD_SOFTFPU}
+{$endif}
+
+{$ifdef FPC_LOAD_SOFTFPU}
 {$define fpc_softfpu_interface}
 {$i softfpu.pp}
 {$undef fpc_softfpu_interface}
+{$endif FPC_LOAD_SOFTFPU}
 
-{$endif defined(CPUARM) or defined(CPUM68K) or (defined(CPUSPARC) and defined(VER2_6))}
 
 {$ifdef android}
   {$I sysandroidh.inc}
@@ -66,14 +79,14 @@ var
   sysenter_supported: LongInt = 0;
 {$endif}
 
-const 
+const
   calculated_cmdline:Pchar=nil;
 {$ifdef FPC_HAS_INDIRECT_ENTRY_INFORMATION}
 {$define FPC_SYSTEM_HAS_OSSETUPENTRYINFORMATION}
 procedure OsSetupEntryInformation(constref info: TEntryInformation); forward;
 {$endif FPC_HAS_INDIRECT_ENTRY_INFORMATION}
 
-{$if defined(CPUARM) or defined(CPUM68K) or (defined(CPUSPARC) and defined(VER2_6))}
+{$ifdef FPC_LOAD_SOFTFPU}
 
 {$define fpc_softfpu_implementation}
 {$if defined(CPUM68K)}
@@ -95,7 +108,7 @@ procedure OsSetupEntryInformation(constref info: TEntryInformation); forward;
 {$define FPC_SYSTEM_HAS_extractFloat32Exp}
 {$define FPC_SYSTEM_HAS_extractFloat32Sign}
 
-{$endif defined(CPUARM) or defined(CPUM68K) or (defined(CPUSPARC) and defined(VER2_6))}
+{$endif FPC_LOAD_SOFTFPU}
 
 {$I system.inc}
 
@@ -399,6 +412,15 @@ function FpUGetRLimit(resource : cInt; rlim : PRLimit) : cInt; cdecl; external c
 {$endif}
 {$endif}
 
+{$if defined(CPUPOWERPC) or defined(CPUPOWERPC64)}
+const
+  page_size = $10000;
+  {$define LAST_PAGE_GENERATES_SIGNAL}
+{$else}
+const
+  page_size = $1000;
+{$endif}
+
 function CheckInitialStkLen(stklen : SizeUInt) : SizeUInt;
 var
   limits : TRLimit;
@@ -419,6 +441,146 @@ begin
     result := stklen;
 end;
 
+
+{$if defined(CPUARM)}
+{$define INITTLS}
+Function fpset_tls(p : pointer;size : SizeUInt):cint;
+begin
+  Result:=do_syscall(syscall_nr___ARM_NR_set_tls,TSysParam(p));
+end;
+{$endif defined(CPUARM)}
+
+{$if defined(CPUI386)}
+{$define INITTLS}
+Function fpset_tls(p : pointer;size : SizeUInt):cint;
+var
+  desc : record
+    entry_number : dword;
+    base_addr : dword;
+    limit : dword;
+    flags : dword;
+  end;
+  selector : word;
+begin
+  // get descriptor from the kernel
+  desc.entry_number:=$ffffffff;
+  // TLS is accessed by negative offsets, only the TCB pointer is at offset 0
+  desc.base_addr:=dword(p)+size-SizeOf(Pointer);
+  // 4 GB, limit is given in pages
+  desc.limit:=$fffff;
+  // seg_32bit:1, contents:0, read_exec_only:0, limit_in_pages:1, seg_not_present:0, useable:1
+  desc.flags:=%1010001;
+  Result:=do_syscall(syscall_nr_set_thread_area,TSysParam(@desc));
+  if Result=0 then
+    begin
+      selector:=desc.entry_number*8+3;
+      asm
+        movw selector,%gs
+        movl desc.base_addr,%eax
+        movl %eax,%gs:0
+      end;
+    end;
+end;
+{$endif defined(CPUI386)}
+
+{$ifdef INITTLS}
+{ This code initialized the TLS segment for single threaded and static programs.
+
+  In case of multithreaded and/or dynamically linked programs it is assumed that they
+  dependent anyways on glibc which initializes tls properly.
+
+  As soon as a purely FPC dynamic loading or multithreading is implemented, the code
+  needs to be extended to handle these cases as well.
+}
+
+procedure InitTLS; [public,alias:'FPC_INITTLS'];
+  const
+    PT_TLS = 7;
+    PT_DYNAMIC = 2;
+
+  type
+    tphdr = record
+      p_type,
+      p_offset,
+      p_vaddr,
+      p_paddr,
+      p_filesz,
+      p_memsz,
+      p_flags,
+      p_align : dword;
+    end;
+    pphdr = ^tphdr;
+
+  var
+    phdr : pphdr;
+    phnum : dword;
+    i   : integer;
+    tls : pointer;
+    auxp : ppointer;
+    found : boolean;
+    size : SizeUInt;
+  begin
+    auxp:=ppointer(envp);
+    { skip environment }
+    while assigned(auxp^) do
+      inc(auxp);
+    inc(auxp);
+    phdr:=nil;
+    phnum:=0;
+    { now we are at the auxillary vector }
+    while assigned(auxp^) do
+      begin
+        case plongint(auxp)^ of
+          3:
+            phdr:=pphdr(ppointer(auxp+1)^);
+          5:
+            phnum:=pdword(auxp+1)^;
+        end;
+        inc(auxp,2);
+      end;
+    found:=false;
+    size:=0;
+    for i:=1 to phnum do
+      begin
+        case phdr^.p_type of
+          PT_TLS:
+            begin
+              found:=true;
+              inc(size,phdr^.p_memsz);
+              size:=Align(size,phdr^.p_align);
+            end;
+          PT_DYNAMIC:
+            { if the program header contains a dynamic section, the program
+              is linked dynamically so the dynamic linker takes care of the
+              allocation of the TLS segment.
+
+              We cannot allocate it by ourself anyways as PT_TLS provides only
+              the size of TLS data of the executable itself
+             }
+            exit;
+        end;
+        inc(phdr);
+      end;
+    if found then
+      begin
+{$ifdef CPUI386}
+        { threadvars should start at a page boundary,
+          add extra space for the TCB }
+        size:=Align(size,4096)+sizeof(Pointer);
+{$endif CPUI386}
+        tls:=Fpmmap(nil,size,3,MAP_PRIVATE+MAP_ANONYMOUS,-1,0);
+        fpset_tls(tls,size);
+      end;
+  end;
+{$endif CPUARM}
+
+
+{$if FPC_FULLVERSION>30200}
+{$if defined(CPUI386) or defined(CPUARM)}
+{$I abitag.inc}
+{$endif defined(CPUI386) or defined(CPUARM)}
+{$endif FPC_FULLVERSION>30200}
+
 begin
 {$if defined(i386) and not defined(FPC_USE_LIBC)}
   InitSyscallIntf;
@@ -433,7 +595,10 @@ begin
 {$endif}
   IsConsole := TRUE;
   StackLength := CheckInitialStkLen(initialStkLen);
-  StackBottom := initialstkptr - StackLength;
+  StackBottom := pointer(ptruint((ptruint(initialstkptr) or (page_size - 1)) + 1 - StackLength));
+{$ifdef LAST_PAGE_GENERATES_SIGNAL}
+  StackBottom:=StackBottom + page_size;
+{$endif}
   { Set up signals handlers (may be needed by init code to test cpu features) }
   InstallSignals;
 {$if defined(cpui386) or defined(cpuarm)}

@@ -400,6 +400,7 @@ type
       procedure SetOn(Bit : longint);
       procedure Clear(Bit : longint);
       procedure Clearall;
+      procedure CopyBits(BitSet : TBits);
       procedure AndBits(BitSet : TBits);
       procedure OrBits(BitSet : TBits);
       procedure XorBits(BitSet : TBits);
@@ -1634,7 +1635,7 @@ type
       //ThreadProc: TThreadProcedure;
       Thread: TThread;
       ThreadID: TThreadID;
-      Exception: Exception;
+      Exception: TObject;
       SyncEvent: PRtlEvent;
       Next: PThreadQueueEntry;
     end;

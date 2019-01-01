@@ -36,11 +36,14 @@ begin
     P:=AddPackage('rtl-console');
     P.ShortName:='rtlc';
     P.Directory:=ADirectory;
-    P.Version:='3.1.1';
+    P.Version:='3.3.1';
     P.Author := 'FPC core team, Pierre Mueller, Peter Vreman';
     P.License := 'LGPL with modification, ';
     P.HomepageURL := 'www.freepascal.org';
     P.OSes:=Rtl_ConsoleOSes;
+    if Defaults.CPU=jvm then
+      P.OSes := P.OSes - [java,android];
+
     P.Email := '';
     P.Description := 'Rtl-console, console abstraction';
     P.NeedLibC:= false;

@@ -68,6 +68,10 @@ interface
           procedure pass_generate_code;override;
        end;
 
+       tcgfinalizetempsnode = class(tfinalizetempsnode)
+          procedure pass_generate_code; override;
+       end;
+
   implementation
 
     uses
@@ -394,9 +398,6 @@ interface
              current_asmdata.CurrAsmList.concatlist(p_asm);
            end;
 
-         { Update section count }
-         current_asmdata.currasmlist.section_count:=current_asmdata.currasmlist.section_count+p_asm.section_count;
-
          { Release register used in the assembler block }
          if (not has_registerlist) then
            cg.deallocallcpuregisters(current_asmdata.CurrAsmList);
@@ -717,6 +718,17 @@ interface
       end;
 
 
+{*****************************************************************************
+                         TCGFINALIZETEMPSNODE
+*****************************************************************************}
+
+    procedure tcgfinalizetempsnode.pass_generate_code;
+      begin
+        hlcg.gen_finalize_code(current_asmdata.CurrAsmList);
+        location.loc:=LOC_VOID;
+      end;
+
+
 begin
    cnothingnode:=tcgnothingnode;
    casmnode:=tcgasmnode;
@@ -725,4 +737,5 @@ begin
    ctempcreatenode:=tcgtempcreatenode;
    ctemprefnode:=tcgtemprefnode;
    ctempdeletenode:=tcgtempdeletenode;
+   cfinalizetempsnode:=tcgfinalizetempsnode;
 end.

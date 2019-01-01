@@ -91,6 +91,12 @@ interface
        tllvmshadowsymtable = class;
 {$endif llvm}
 
+       tmanagementoperator_offset_entry = record
+         pd : tprocdef;
+         offset : asizeint;
+       end;
+       pmanagementoperator_offset_entry = ^tmanagementoperator_offset_entry;
+
        tabstractrecordsymtable = class(tstoredsymtable)
 {$ifdef llvm}
        private
@@ -104,6 +110,7 @@ interface
           padalignment : shortint;   { size to a multiple of which the symtable has to be rounded up }
           recordalignmin,            { local equivalents of global settings, so that records can }
           maxCrecordalign: shortint; { be created with custom settings internally }
+          has_fields_with_mop : tmanagementoperators; { whether any of the fields has the need for a management operator (or one of the field's fields) }
           constructor create(const n:string;usealign,recordminalign,recordmaxCalign:shortint);
           destructor destroy;override;
           procedure ppuload(ppufile:tcompilerppufile);override;
@@ -120,6 +127,10 @@ interface
           function is_packed: boolean;
           function has_single_field(out def:tdef): boolean;
           function get_unit_symtable: tsymtable;
+          { collects all management operators of the specified type in list (which
+            is not cleared); the entries are copies and thus must be freed by the
+            caller }
+          procedure get_managementoperator_offset_list(mop:tmanagementoperator;list:tfplist);
         protected
           { size in bytes including padding }
           _datasize      : asizeint;
@@ -128,8 +139,12 @@ interface
           databitsize    : asizeint;
           { size in bytes of padding }
           _paddingsize   : word;
+          { array of tmanagementoperator_offset_entry lists; only assigned if
+            they had been queried once by get_management_operator_list }
+          mop_list : array[tmanagementoperator] of tfplist;
           procedure setdatasize(val: asizeint);
           function getfieldoffset(sym: tfieldvarsym; base: asizeint; var globalfieldalignment: shortint): asizeint;
+          procedure do_get_managementoperator_offset_list(data:tobject;arg:pointer);
         public
           function iscurrentunit: boolean; override;
           property datasize : asizeint read _datasize write setdatasize;
@@ -478,7 +493,6 @@ implementation
 {*****************************************************************************
                              TStoredSymtable
 *****************************************************************************}
-
 
     constructor tstoredsymtable.create(const s:string);
       begin
@@ -1161,11 +1175,46 @@ implementation
 
 
     destructor tabstractrecordsymtable.destroy;
+
+      { for some reason a compiler built with 3.3.1 fails building the libxml2
+        package if the below define is not defined and thus the code snippet is
+        part of the destructor itself and not a nested procedure; until that bug
+        is fixed this is used as a workaround :/ }
+{$define codegen_workaround}
+{$ifdef codegen_workaround}
+      procedure free_mop_list(mop:tmanagementoperator);
+        var
+          i : longint;
+        begin
+          if assigned(mop_list[mop]) then
+            for i:=0 to mop_list[mop].count-1 do
+              dispose(pmanagementoperator_offset_entry(mop_list[mop][i]));
+          mop_list[mop].free;
+        end;
+{$endif codegen_workaround}
+
+      var
+        mop : tmanagementoperator;
+{$ifndef codegen_workaround}
+        i : longint;
+{$endif codegen_workaround}
       begin
+        if refcount>1 then
+          exit;
 {$ifdef llvm}
-        if refcount=1 then
-          fllvmst.free;
+        fllvmst.free;
 {$endif llvm}
+        for mop:=low(tmanagementoperator) to high(tmanagementoperator) do
+          begin
+{$ifdef codegen_workaround}
+            free_mop_list(mop);
+{$else codegen_workaround}
+            if assigned(mop_list[mop]) then
+              for i:=0 to mop_list[mop].count-1 do
+                dispose(pmanagementoperator_offset_entry(mop_list[mop][i]));
+            mop_list[mop].free;
+{$endif codegen_workaround}
+          end;
         inherited destroy;
       end;
 
@@ -1179,6 +1228,7 @@ implementation
         recordalignmin:=shortint(ppufile.getbyte);
         if (usefieldalignment=C_alignment) then
           fieldalignment:=shortint(ppufile.getbyte);
+        ppufile.getsmallset(has_fields_with_mop);
         inherited ppuload(ppufile);
       end;
 
@@ -1196,6 +1246,10 @@ implementation
          ppufile.putbyte(byte(recordalignmin));
          if (usefieldalignment=C_alignment) then
            ppufile.putbyte(byte(fieldalignment));
+         { it's not really a "symtableoption", but loading this from the record
+           def requires storing the set in the recorddef at least between
+           ppuload and deref/derefimpl }
+         ppufile.putsmallset(has_fields_with_mop);
          ppufile.writeentry(ibrecsymtableoptions);
 
          inherited ppuwrite(ppufile);
@@ -1259,6 +1313,11 @@ implementation
         sym.visibility:=vis;
         { this symbol can't be loaded to a register }
         sym.varregable:=vr_none;
+        { management operators }
+        if sym.vardef.typ in [recorddef,objectdef] then
+          has_fields_with_mop:=has_fields_with_mop + tabstractrecordsymtable(tabstractrecorddef(sym.vardef).symtable).has_fields_with_mop;
+        if sym.vardef.typ=recorddef then
+          has_fields_with_mop:=has_fields_with_mop + trecordsymtable(trecorddef(sym.vardef).symtable).managementoperators;
         { Calculate field offset }
         l:=sym.getsize;
         vardef:=sym.vardef;
@@ -1606,6 +1665,75 @@ implementation
         result:=defowner.owner;
         while assigned(result) and (result.symtabletype in [ObjectSymtable,recordsymtable]) do
           result:=result.defowner.owner;
+      end;
+
+
+    procedure tabstractrecordsymtable.do_get_managementoperator_offset_list(data:tobject;arg:pointer);
+      var
+        sym : tsym absolute data;
+        fsym : tfieldvarsym absolute data;
+        mop : tmanagementoperator;
+        entry : pmanagementoperator_offset_entry;
+        sublist : tfplist;
+        i : longint;
+      begin
+        if sym.typ<>fieldvarsym then
+          exit;
+        if not is_record(fsym.vardef) and not is_object(fsym.vardef) and not is_cppclass(fsym.vardef) then
+          exit;
+        mop:=tmanagementoperator(ptruint(arg));
+        if not assigned(mop_list[mop]) then
+          internalerror(2018082303);
+
+        if is_record(fsym.vardef) then
+          begin
+            if mop in trecordsymtable(trecorddef(fsym.vardef).symtable).managementoperators then
+              begin
+                new(entry);
+                entry^.pd:=search_management_operator(mop,fsym.vardef);
+                if not assigned(entry^.pd) then
+                  internalerror(2018082302);
+                entry^.offset:=fsym.fieldoffset;
+                mop_list[mop].add(entry);
+              end;
+          end;
+
+        sublist:=tfplist.create;
+        tabstractrecordsymtable(tabstractrecorddef(fsym.vardef).symtable).get_managementoperator_offset_list(mop,sublist);
+        for i:=0 to sublist.count-1 do
+          begin
+            entry:=pmanagementoperator_offset_entry(sublist[i]);
+            entry^.offset:=entry^.offset+fsym.fieldoffset;
+            mop_list[mop].add(entry);
+          end;
+        { we don't need to remove the entries as they become part of list }
+        sublist.free;
+      end;
+
+    procedure tabstractrecordsymtable.get_managementoperator_offset_list(mop:tmanagementoperator;list:tfplist);
+      var
+        i : longint;
+        entry,entrycopy : pmanagementoperator_offset_entry;
+      begin
+        if not assigned(list) then
+          internalerror(2018082301);
+        if mop=mop_none then
+          exit;
+        if not (mop in has_fields_with_mop) then
+          { none of the fields or one of the field's fields has the requested operator }
+          exit;
+        if not assigned(mop_list[mop]) then
+          begin
+            mop_list[mop]:=tfplist.create;
+            SymList.ForEachCall(@do_get_managementoperator_offset_list,pointer(ptruint(mop)));
+          end;
+        for i:=0 to mop_list[mop].count-1 do
+          begin
+            entry:=pmanagementoperator_offset_entry(mop_list[mop][i]);
+            New(entrycopy);
+            entrycopy^:=entry^;
+            list.add(entrycopy);
+          end;
       end;
 
     procedure tabstractrecordsymtable.setdatasize(val: asizeint);
@@ -2624,6 +2752,8 @@ implementation
 
     destructor twithsymtable.destroy;
       begin
+        if refcount>1 then
+          exit;
         withrefnode.free;
         { Disable SymList because we don't Own it }
         SymList:=nil;

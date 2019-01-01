@@ -377,8 +377,9 @@ unit cpubase;
       doesn't handle ROR_C detection }
     function is_thumb32_imm(d : aint) : boolean;
     function split_into_shifter_const(value : aint;var imm1: dword; var imm2: dword):boolean;
-    function is_continuous_mask(d : aint;var lsb, width: byte) : boolean;
+    function is_continuous_mask(d : aword;var lsb, width: byte) : boolean;
     function dwarf_reg(r:tregister):shortint;
+    function dwarf_reg_no_error(r:tregister):shortint;
 
     function IsIT(op: TAsmOp) : boolean;
     function GetITLevels(op: TAsmOp) : longint;
@@ -609,7 +610,7 @@ unit cpubase;
           end;
       end;
     
-    function is_continuous_mask(d : aint;var lsb, width: byte) : boolean;
+    function is_continuous_mask(d : aword;var lsb, width: byte) : boolean;
       var
         msb : byte;
       begin
@@ -618,7 +619,7 @@ unit cpubase;
         
         width:=msb-lsb+1;
         
-        result:=(lsb<>255) and (msb<>255) and ((((1 shl (msb-lsb+1))-1) shl lsb) = d);
+        result:=(lsb<>255) and (msb<>255) and (aword(((1 shl (msb-lsb+1))-1) shl lsb) = d);
       end;
 
 
@@ -652,6 +653,11 @@ unit cpubase;
         result:=regdwarf_table[findreg_by_number(r)];
         if result=-1 then
           internalerror(200603251);
+      end;
+
+    function dwarf_reg_no_error(r:tregister):shortint;
+      begin
+        result:=regdwarf_table[findreg_by_number(r)];
       end;
 
       { Low part of 64bit return value }

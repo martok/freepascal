@@ -183,7 +183,7 @@ interface
 
     { sets varsym varstate field correctly }
     type
-      tvarstateflag = (vsf_must_be_valid,vsf_use_hints);
+      tvarstateflag = (vsf_must_be_valid,vsf_use_hints,vsf_use_hint_for_string_result);
       tvarstateflags = set of tvarstateflag;
     procedure set_varstate(p:tnode;newstate:tvarstate;varstateflags:tvarstateflags);
 
@@ -1299,7 +1299,20 @@ implementation
                                begin
                                  if (vo_is_funcret in hsym.varoptions) then
                                    begin
-                                     if (vsf_use_hints in varstateflags) then
+                                     { An uninitialized function Result of a managed type needs special handling.
+                                       When passing it as a var parameter a warning need to be emitted, since a user
+                                       may expect Result to be empty (nil) by default as it happens with local vars
+                                       of a managed type. But this is not true for Result and may lead to serious issues.
+
+                                       The only exception is SetLength(Result, ?) for a string Result. A user always
+                                       expects undefined contents of the string after calling SetLength(). In such
+                                       case a hint need to be emitted.
+                                     }
+                                     if is_managed_type(hsym.vardef) then
+                                       if not ( is_string(hsym.vardef) and (vsf_use_hint_for_string_result in varstateflags) ) then
+                                         exclude(varstateflags,vsf_use_hints);
+
+                                     if vsf_use_hints in varstateflags then
                                        begin
                                          if is_managed_type(hsym.vardef) then
                                            CGMessagePos(p.fileinfo,sym_h_managed_function_result_uninitialized)
@@ -1964,7 +1977,7 @@ implementation
               { all types can be passed to a formaldef,
                 but it is not the prefered way }
               if not is_constnode(fromnode) then
-                eq:=te_convert_l2
+                eq:=te_convert_l6
               else
                 eq:=te_incompatible;
             end;
@@ -2037,11 +2050,6 @@ implementation
       begin
         { Note: eq must be already valid, it will only be updated! }
         case def_to.typ of
-          formaldef :
-            begin
-              { all types can be passed to a formaldef }
-              eq:=te_equal;
-            end;
           stringdef :
             begin
               { to support ansi/long/wide strings in a proper way }
@@ -3122,9 +3130,9 @@ implementation
         variantorddef_cl: array[tordtype] of tvariantequaltype =
           (tve_incompatible,tve_byte,tve_word,tve_cardinal,tve_chari64,tve_incompatible,
            tve_shortint,tve_smallint,tve_longint,tve_chari64,tve_incompatible,
+           tve_boolformal,tve_boolformal,tve_boolformal,tve_boolformal,tve_boolformal,
            tve_boolformal,tve_boolformal,tve_boolformal,tve_boolformal,
-           tve_boolformal,tve_boolformal,tve_boolformal,tve_boolformal,
-           tve_chari64,tve_chari64,tve_dblcurrency);
+           tve_chari64,tve_chari64,tve_dblcurrency,tve_incompatible);
 { TODO: fixme for 128 bit floats }
         variantfloatdef_cl: array[tfloattype] of tvariantequaltype =
           (tve_single,tve_dblcurrency,tve_extended,tve_extended,

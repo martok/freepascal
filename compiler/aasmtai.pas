@@ -145,7 +145,11 @@ interface
           { offset of symbol's GOT slot in GOT }
           aitconst_got,
           { offset of symbol itself from GOT }
-          aitconst_gotoff_symbol
+          aitconst_gotoff_symbol,
+          { ARM TLS code }
+          aitconst_gottpoff,
+          aitconst_tpoff
+
         );
 
         tairealconsttype = (
@@ -262,6 +266,10 @@ interface
        ,top_para
        ,top_asmlist
 {$endif llvm}
+{$if defined(riscv32) or defined(riscv64)}
+       ,top_fenceflags
+       ,top_roundingmode
+{$endif defined(riscv32) or defined(riscv64)}
        );
 
       { kinds of operations that an instruction can perform on an operand }
@@ -463,6 +471,10 @@ interface
             top_para   : (paras: tfplist);
             top_asmlist : (asmlist: tasmlist);
         {$endif llvm}
+        {$if defined(riscv32) or defined(riscv64)}
+            top_fenceflags : (fenceflags : TFenceFlags);
+            top_roundingmode : (roundingmode : TRoundingMode);
+        {$endif defined(riscv32) or defined(riscv64)}
         end;
         poper=^toper;
 
@@ -570,6 +582,9 @@ interface
           function getcopy:tlinkedlistitem;override;
        end;
 
+       type
+         TSectionFlags = (SF_None,SF_A,SF_W,SF_X);
+         TSectionProgbits = (SPB_None,SPB_PROGBITS,SPB_NOBITS);
 
        { Generates a section / segment directive }
        tai_section = class(tai)
@@ -577,7 +592,11 @@ interface
           secorder : TasmSectionorder;
           secalign : longint;
           name     : pshortstring;
-          sec      : TObjSection; { used in binary writer }
+          { used in binary writer }
+          sec      : TObjSection;
+          { used only by ELF so far }
+          secflags : TSectionFlags;
+          secprogbits : TSectionProgbits;
           destructor Destroy;override;
           constructor ppuload(t:taitype;ppufile:tcompilerppufile);override;
           procedure ppuwrite(ppufile:tcompilerppufile);override;
@@ -837,11 +856,13 @@ interface
         { alignment for operator }
         tai_align_abstract = class(tai)
            aligntype : byte;   { 1 = no align, 2 = word align, 4 = dword align }
+           maxbytes  : byte;   { if needed bytes would be larger than maxbyes, alignment is ignored }
            fillsize  : byte;   { real size to fill }
            fillop    : byte;   { value to fill with - optional }
            use_op    : boolean;
            constructor Create(b:byte);virtual;
            constructor Create_op(b: byte; _op: byte);virtual;
+           constructor create_max(b: byte; max: byte);virtual;
            constructor Create_zeros(b:byte);
            constructor ppuload(t:taitype;ppufile:tcompilerppufile);override;
            procedure ppuwrite(ppufile:tcompilerppufile);override;
@@ -939,7 +960,7 @@ interface
       add_reg_instruction_hook : tadd_reg_instruction_proc;
 
     procedure maybe_new_object_file(list:TAsmList);
-    procedure new_section(list:TAsmList;Asectype:TAsmSectiontype;const Aname:string;Aalign:byte;Asecorder:TasmSectionorder=secorder_default);
+    function new_section(list:TAsmList;Asectype:TAsmSectiontype;const Aname:string;Aalign:byte;Asecorder:TasmSectionorder=secorder_default) : tai_section;
 
     function ppuloadai(ppufile:tcompilerppufile):tai;
     procedure ppuwriteai(ppufile:tcompilerppufile;n:tai);
@@ -958,7 +979,6 @@ implementation
     const
       pputaimarker = 254;
 
-
 {****************************************************************************
                                  Helpers
  ****************************************************************************}
@@ -970,9 +990,10 @@ implementation
       end;
 
 
-    procedure new_section(list:TAsmList;Asectype:TAsmSectiontype;const Aname:string;Aalign:byte;Asecorder:TasmSectionorder=secorder_default);
+    function new_section(list:TAsmList;Asectype:TAsmSectiontype;const Aname:string;Aalign:byte;Asecorder:TasmSectionorder=secorder_default) : tai_section;
       begin
-        list.concat(tai_section.create(Asectype,Aname,Aalign,Asecorder));
+        Result:=tai_section.create(Asectype,Aname,Aalign,Asecorder);
+        list.concat(Result);
         inc(list.section_count);
         list.concat(cai_align.create(Aalign));
       end;
@@ -1203,6 +1224,8 @@ implementation
         sectype:=TAsmSectiontype(ppufile.getbyte);
         secalign:=ppufile.getlongint;
         name:=ppufile.getpshortstring;
+        secflags:=TSectionFlags(ppufile.getbyte);
+        secprogbits:=TSectionProgbits(ppufile.getbyte);
         sec:=nil;
       end;
 
@@ -1219,6 +1242,8 @@ implementation
         ppufile.putbyte(byte(sectype));
         ppufile.putlongint(secalign);
         ppufile.putstring(name^);
+        ppufile.putbyte(byte(secflags));
+        ppufile.putbyte(byte(secprogbits));
       end;
 
 
@@ -1738,7 +1763,7 @@ implementation
       end;
 
 
-    constructor tai_const.Create_rel_sym_offset(_typ: taiconst_type; _sym,_endsym: tasmsymbol; _ofs: int64);
+    constructor tai_const.Create_rel_sym_offset(_typ: taiconst_type; _sym, _endsym: tasmsymbol; _ofs: int64);
        begin
          self.create_sym_offset(_sym,_ofs);
          consttype:=_typ;
@@ -3074,6 +3099,7 @@ implementation
           fillsize:=0;
           fillop:=0;
           use_op:=false;
+          maxbytes:=aligntype;
        end;
 
 
@@ -3088,6 +3114,22 @@ implementation
           fillsize:=0;
           fillop:=_op;
           use_op:=true;
+          maxbytes:=aligntype;
+       end;
+
+
+     constructor tai_align_abstract.create_max(b : byte; max : byte);
+       begin
+          inherited Create;
+          typ:=ait_align;
+          if b in [1,2,4,8,16,32] then
+            aligntype := b
+          else
+            aligntype := 1;
+          maxbytes:=max;
+          fillsize:=0;
+          fillop:=0;
+          use_op:=false;
        end;
 
 
@@ -3102,6 +3144,7 @@ implementation
          use_op:=true;
          fillsize:=0;
          fillop:=0;
+         maxbytes:=aligntype;
        end;
 
 
@@ -3121,6 +3164,7 @@ implementation
         fillsize:=0;
         fillop:=ppufile.getbyte;
         use_op:=ppufile.getboolean;
+        maxbytes:=ppufile.getbyte;
       end;
 
 
@@ -3130,6 +3174,7 @@ implementation
         ppufile.putbyte(aligntype);
         ppufile.putbyte(fillop);
         ppufile.putboolean(use_op);
+        ppufile.putbyte(maxbytes);
       end;
 
 

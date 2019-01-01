@@ -62,6 +62,12 @@ interface
           { label (only used in pass_generate_code) }
           blocklabel : tasmlabel;
 
+          { shortcut - set to true if blocklabel isn't actually unique to the
+            case block due to one of the following conditions:
+            - if the node contains a jump, then the label is set to that jump's destination,
+            - if the node is empty, the label is set to the end label. }
+          shortcut: Boolean;
+
           statementlabel : tlabelnode;
           { instructions }
           statement  : tnode;
@@ -121,6 +127,9 @@ interface
 
     { counts the labels }
     function case_count_labels(root : pcaselabel) : longint;
+    { Returns the true count in a case block, which includes each individual
+      value in a range (e.g. "0..2" counts as 3) }
+    function case_true_count(root : pcaselabel) : longint;
     { searches the highest label }
     function case_get_max(root : pcaselabel) : tconstexprint;
     { searches the lowest label }
@@ -215,7 +224,7 @@ implementation
 
       begin
          result:=nil;
-         resultdef:=pasbool8type;
+         resultdef:=pasbool1type;
          typecheckpass(right);
          set_varstate(right,vs_read,[vsf_must_be_valid]);
          if codegenerror then
@@ -258,7 +267,7 @@ implementation
              }
              if  (
                    (left.resultdef.typ = orddef) and not
-                   (torddef(left.resultdef).ordtype in [s8bit,u8bit,uchar,pasbool8,bool8bit])
+                   (torddef(left.resultdef).ordtype in [s8bit,u8bit,uchar,pasbool1,pasbool8,bool8bit])
                  )
                 or
                  (
@@ -296,7 +305,7 @@ implementation
             ((right.nodetype = setconstn) and
              (tnormalset(tsetconstnode(right).value_set^) = [])) then
           begin
-            t:=cordconstnode.create(0,pasbool8type,false);
+            t:=cordconstnode.create(0,pasbool1type,false);
             typecheckpass(t);
             result:=t;
             exit;
@@ -323,10 +332,10 @@ implementation
                  { into account                                             }
                  if Tordconstnode(left).value.signed then
                    t:=cordconstnode.create(byte(tordconstnode(left).value.svalue in Tsetconstnode(right).value_set^),
-                     pasbool8type,true)
+                     pasbool1type,true)
                  else
                    t:=cordconstnode.create(byte(tordconstnode(left).value.uvalue in Tsetconstnode(right).value_set^),
-                     pasbool8type,true);
+                     pasbool1type,true);
                  typecheckpass(t);
                  result:=t;
                  exit;
@@ -336,7 +345,7 @@ implementation
                  if (Tordconstnode(left).value<int64(tsetdef(right.resultdef).setbase)) or
                     (Tordconstnode(left).value>int64(Tsetdef(right.resultdef).setmax)) then
                    begin
-                     t:=cordconstnode.create(0, pasbool8type, true);
+                     t:=cordconstnode.create(0, pasbool1type, true);
                      typecheckpass(t);
                      result:=t;
                      exit;
@@ -437,6 +446,29 @@ implementation
          count(root);
          case_count_labels:=_l;
       end;
+
+
+    { Returns the true count in a case block, which includes each individual
+      value in a range (e.g. "0..2" counts as 3) }
+    function case_true_count(root : pcaselabel) : longint;
+      var
+         _l : longint;
+
+      procedure count(p : pcaselabel);
+        begin
+           inc(_l, (p^._high.svalue - p^._low.svalue) + 1);
+           if assigned(p^.less) then
+             count(p^.less);
+           if assigned(p^.greater) then
+             count(p^.greater);
+        end;
+
+      begin
+        _l:=0;
+        count(root);
+        case_true_count:=_l;
+      end;
+
 
 
     function case_get_max(root : pcaselabel) : tconstexprint;

@@ -271,7 +271,32 @@
   {$define cputargethasfixedstack}
   {$define cpurefshaveindexreg}
   {$define SUPPORT_GET_FRAME}
+  {$define SUPPORT_SAFECALL}
 {$endif aarch64}
+
+{$ifdef riscv32}
+  {$define cpu32bit}
+  {$define cpu32bitaddr}
+  {$define cpu32bitalu}
+  {$define cpufpemu}
+  {$define cputargethasfixedstack}
+  {$define cpuneedsmulhelper}
+  {$define cpuneedsdivhelper}
+  {$define cpucapabilities}
+  {$define cpurequiresproperalignment}
+{$endif riscv32}
+
+{$ifdef riscv64}
+  {$define cpu64bit}
+  {$define cpu64bitaddr}
+  {$define cpu64bitalu}
+  {$define cpufpemu}
+  {$define cputargethasfixedstack}
+  {$define cpuneedsmulhelper}
+  {$define cpuneedsdivhelper}
+  {$define cpucapabilities}
+  {$define cpurequiresproperalignment}
+{$endif riscv64}
 
 {$IFDEF MACOS}
 {$DEFINE USE_FAKE_SYSUTILS}

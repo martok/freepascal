@@ -164,6 +164,8 @@ interface
 
          disabledircache : boolean;
 
+         tlsmodel : ttlsmodel;
+
 {$if defined(i8086)}
          x86memorymodel  : tx86memorymodel;
 {$endif defined(i8086)}
@@ -404,6 +406,9 @@ interface
           procalign : 0;
           loopalign : 0;
           jumpalign : 0;
+          jumpalignskipmax    : 0;
+          coalescealign   : 0;
+          coalescealignskipmax: 0;
           constalignmin : 0;
           constalignmax : 0;
           varalignmin : 0;
@@ -529,6 +534,18 @@ interface
         asmcputype : cpu_none;
         fputype : fpu_x87;
   {$endif i8086}
+  {$ifdef riscv32}
+        cputype : cpu_rv32imafd;
+        optimizecputype : cpu_rv32imafd;
+        asmcputype : cpu_none;
+        fputype : fpu_fd;
+  {$endif riscv32}
+  {$ifdef riscv64}
+        cputype : cpu_rv64imafdc;
+        optimizecputype : cpu_rv64imafdc;
+        asmcputype : cpu_none;
+        fputype : fpu_fd;
+  {$endif riscv64}
 {$endif not GENERIC_CPU}
         asmmode : asmmode_standard;
 {$ifndef jvm}
@@ -541,6 +558,8 @@ interface
         minfpconstprec : s32real;
 
         disabledircache : false;
+
+        tlsmodel : tlsm_none;
 {$if defined(i8086)}
         x86memorymodel : mm_small;
 {$endif defined(i8086)}
@@ -1405,7 +1424,7 @@ implementation
        if localexepath='' then
         begin
           hs1 := ExtractFileName(exeName);
-          ChangeFileExt(hs1,source_info.exeext);
+	  hs1 := ChangeFileExt(hs1,source_info.exeext);
 {$ifdef macos}
           FindFile(hs1,GetEnvironmentVariable('Commands'),false,localExepath);
 {$else macos}

@@ -925,7 +925,7 @@ type
         that we use the base types instead of the cpu-specific ones. }
       sintdef:=torddef.create(s64bit,low(int64),high(int64),false);
       uintdef:=torddef.create(u64bit,low(qword),high(qword),false);
-      booldef:=torddef.create(pasbool8,0,1,false);
+      booldef:=torddef.create(pasbool1,0,1,false);
       strdef:=tstringdef.createansi(0,false);
       setdef:=tsetdef.create(sintdef,0,255,false);
       realdef:=tfloatdef.create(s80real,false);
@@ -3042,6 +3042,9 @@ type
             alignment.procalign:=tokenreadlongint;
             alignment.loopalign:=tokenreadlongint;
             alignment.jumpalign:=tokenreadlongint;
+            alignment.jumpalignskipmax:=tokenreadlongint;
+            alignment.coalescealign:=tokenreadlongint;
+            alignment.coalescealignskipmax:=tokenreadlongint;
             alignment.constalignmin:=tokenreadlongint;
             alignment.constalignmax:=tokenreadlongint;
             alignment.varalignmin:=tokenreadlongint;
@@ -3082,6 +3085,8 @@ type
             minfpconstprec:=tfloattype(tokenreadenum(sizeof(tfloattype)));
 
             disabledircache:=boolean(tokenreadbyte);
+
+            tlsmodel:=ttlsmodel(tokenreadenum(sizeof(ttlsmodel)));
 { TH: Since the field was conditional originally, it was not stored in PPUs.  }
 { While adding ControllerSupport constant, I decided not to store ct_none     }
 { on targets not supporting controllers, but this might be changed here and   }
@@ -3122,6 +3127,9 @@ type
             tokenwritelongint(alignment.procalign);
             tokenwritelongint(alignment.loopalign);
             tokenwritelongint(alignment.jumpalign);
+            tokenwritelongint(alignment.jumpalignskipmax);
+            tokenwritelongint(alignment.coalescealign);
+            tokenwritelongint(alignment.coalescealignskipmax);
             tokenwritelongint(alignment.constalignmin);
             tokenwritelongint(alignment.constalignmax);
             tokenwritelongint(alignment.varalignmin);
@@ -3160,6 +3168,9 @@ type
             tokenwriteenum(minfpconstprec,sizeof(tfloattype));
 
             recordtokenbuf.write(byte(disabledircache),1);
+
+            tokenwriteenum(tlsmodel,sizeof(tlsmodel));
+
 { TH: See note about controllertype field in tokenreadsettings. }
 {$PUSH}
  {$WARN 6018 OFF} (* Unreachable code due to compile time evaluation *)

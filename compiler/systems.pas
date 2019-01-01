@@ -44,7 +44,18 @@ interface
        talignmentinfo = packed record
          procalign,
          loopalign,
+         { alignment for labels after unconditional jumps, this must be a power of two }
          jumpalign,
+         { max. alignment for labels after unconditional jumps:
+           the compiler tries to align jumpalign, however, to do so it inserts at maximum jumpalignskipmax bytes or uses
+           the next smaller power of two of jumpalign }
+         jumpalignskipmax,
+         { alignment for labels where two flows of the program flow coalesce, this must be a power of two }
+         coalescealign,
+         { max. alignment for labels where two flows of the program flow coalesce
+           the compiler tries to align to coalescealign, however, to do so it inserts at maximum coalescealignskipmax bytes or uses
+           the next smaller power of two of coalescealign }
+         coalescealignskipmax,
          constalignmin,
          constalignmax,
          varalignmin,
@@ -229,10 +240,11 @@ interface
        system_any = system_none;
 
        systems_wince = [system_arm_wince,system_i386_wince];
-       systems_android = [system_arm_android, system_i386_android, system_mipsel_android];
+       systems_android = [system_arm_android, system_aarch64_android, system_i386_android, system_x86_64_android, system_mipsel_android];
        systems_linux = [system_i386_linux,system_x86_64_linux,system_powerpc_linux,system_powerpc64_linux,
                        system_arm_linux,system_sparc_linux,system_sparc64_linux,system_m68k_linux,
-                       system_x86_6432_linux,system_mipseb_linux,system_mipsel_linux,system_aarch64_linux];
+                       system_x86_6432_linux,system_mipseb_linux,system_mipsel_linux,system_aarch64_linux,
+                       system_riscv32_linux,system_riscv64_linux];
        systems_dragonfly = [system_x86_64_dragonfly];
        systems_freebsd = [system_i386_freebsd,
                           system_x86_64_freebsd];
@@ -274,7 +286,7 @@ interface
                            system_mips_embedded,system_arm_embedded,
                            system_powerpc64_embedded,system_avr_embedded,
                            system_jvm_java32,system_mipseb_embedded,system_mipsel_embedded,
-                           system_i8086_embedded];
+                           system_i8086_embedded,system_riscv32_embedded,system_riscv64_embedded];
 
        { all systems that allow section directive }
        systems_allow_section = systems_embedded;
@@ -397,7 +409,7 @@ interface
        cpu2str : array[TSystemCpu] of string[10] =
             ('','i386','m68k','alpha','powerpc','sparc','vm','ia64','x86_64',
              'mips','arm', 'powerpc64', 'avr', 'mipsel','jvm', 'i8086',
-             'aarch64', 'wasm', 'sparc64');
+             'aarch64', 'wasm', 'sparc64','riscv32','riscv64');
 
        abiinfo : array[tabi] of tabiinfo = (
          (name: 'DEFAULT'; supported: true),
@@ -409,7 +421,8 @@ interface
          (name: 'ARMEB'  ; supported:{$ifdef FPC_ARMEB}true{$else}false{$endif}),
          (name: 'EABIHF' ; supported:{$ifdef FPC_ARMHF}true{$else}false{$endif}),
          (name: 'OLDWIN32GNU'; supported:{$ifdef I386}true{$else}false{$endif}),
-         (name: 'AARCH64IOS'; supported:{$ifdef aarch64}true{$else}false{$endif})
+         (name: 'AARCH64IOS'; supported:{$ifdef aarch64}true{$else}false{$endif}),
+         (name: 'RISCVHF'; supported:{$if defined(riscv32) or defined(riscv64)}true{$else}false{$endif})
        );
 
     var
@@ -656,6 +669,14 @@ begin
        jumpalign:=s.jumpalign
      else if s.jumpalign<>0 then
        result:=false;
+     if (s.coalescealign in [1,2,4,8,16,32,64,128]) or (s.coalescealign=256) then
+       coalescealign:=s.coalescealign
+     else if s.coalescealign<>0 then
+       result:=false;
+     if s.jumpalignskipmax>0 then
+       jumpalignskipmax:=s.jumpalignskipmax;
+     if s.coalescealign>0 then
+       coalescealignskipmax:=s.coalescealignskipmax;
      { general update rules:
        minimum: if higher then update
        maximum: if lower then update or if undefined then update }
@@ -906,6 +927,10 @@ begin
    default_target(system_powerpc_aix);
    {$define default_target_set}
   {$endif}
+  {$ifdef android}
+   {$define default_target_set}
+   default_target(system_x86_64_android);
+  {$endif}
   {$ifndef default_target_set}
     default_target(system_powerpc_linux);
   {$endif default_target_set}
@@ -1026,6 +1051,10 @@ begin
       {$define default_target_set}
       default_target(system_aarch64_darwin);
     {$endif darwin}
+    {$ifdef android}
+      {$define default_target_set}
+      default_target(system_aarch64_android);
+    {$endif android}
     {$ifndef default_target_set}
       default_target(system_aarch64_linux);
       {$define default_target_set}
@@ -1036,6 +1065,14 @@ begin
 {$ifdef wasm}
   default_target(system_wasm_wasm32);
 {$endif}
+
+{$ifdef riscv32}
+  default_target(system_riscv32_linux);
+{$endif riscv32}
+
+{$ifdef riscv64}
+  default_target(system_riscv64_linux);
+{$endif riscv64}
 end;
 
 

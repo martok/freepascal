@@ -75,7 +75,9 @@ Implementation
         (r1.index = r2.index) and (r1.scalefactor = r2.scalefactor) and
         (r1.symbol=r2.symbol) and (r1.refaddr = r2.refaddr) and
         (r1.relsymbol = r2.relsymbol) and
-        (r1.addressmode = r2.addressmode);
+        (r1.addressmode = r2.addressmode) and
+        (r1.volatility=[]) and
+        (r2.volatility=[]);
     end;
 
 
@@ -349,7 +351,7 @@ Implementation
 
                             DebugMsg('Peephole LdiMov/Cp2Ldi/Cpi performed', p);
 
-                            RemoveCurrentP(taicpu(p));
+                            RemoveCurrentP(p);
                           end;
                         ReleaseUsedRegs(TmpUsedRegs);
                       end;
@@ -541,7 +543,7 @@ Implementation
                       begin
                         DebugMsg('Redundant Andi removed', p);
 
-                        result:=RemoveCurrentP(taicpu(p));
+                        result:=RemoveCurrentP(p);
                       end;
                   end;
                 A_ADD:
@@ -552,7 +554,7 @@ Implementation
                     begin
                       DebugMsg('Peephole AddAdc2Add performed', p);
 
-                      result:=RemoveCurrentP(taicpu(p));
+                      result:=RemoveCurrentP(p);
                     end;
                   end;
                 A_SUB:
@@ -565,7 +567,7 @@ Implementation
 
                       taicpu(hp1).opcode:=A_SUB;
 
-                      result:=RemoveCurrentP(taicpu(p));
+                      result:=RemoveCurrentP(p);
                     end;
                   end;
                 A_CLR:
@@ -588,7 +590,7 @@ Implementation
                       begin
                         DebugMsg('Peephole ClrMov2Mov performed', p);
 
-                        result:=RemoveCurrentP(taicpu(p));
+                        result:=RemoveCurrentP(p);
                       end
                     { turn
                       clr rX
@@ -625,7 +627,7 @@ Implementation
                             dealloc.Free;
                           end;
 
-                        result:=RemoveCurrentP(taicpu(p));
+                        result:=RemoveCurrentP(p);
                       end;
                   end;
                 A_PUSH:
@@ -667,9 +669,9 @@ Implementation
 
                            taicpu(hp3).loadreg(1, taicpu(p).oper[0]^.reg);
 
-                           RemoveCurrentP(taicpu(p));
-                           RemoveCurrentP(taicpu(p));
-                           result:=RemoveCurrentP(taicpu(p));
+                           RemoveCurrentP(p);
+                           RemoveCurrentP(p);
+                           result:=RemoveCurrentP(p);
                          end
                        else
                          begin
@@ -757,7 +759,7 @@ Implementation
                           not(MatchInstruction(hp1,[A_CALL,A_RCALL])) then
                           begin
                             DebugMsg('Peephole Mov2Nop performed', p);
-                            result:=RemoveCurrentP(taicpu(p));
+                            result:=RemoveCurrentP(p);
                             ReleaseUsedRegs(TmpUsedRegs);
                             exit;
                           end;
@@ -807,7 +809,7 @@ Implementation
                         { p will be removed, update used register as we continue
                           with the next instruction after p }
 
-                        result:=RemoveCurrentP(taicpu(p));
+                        result:=RemoveCurrentP(p);
                       end
                     { remove
                       mov reg0,reg0
@@ -819,7 +821,7 @@ Implementation
                       begin
                         DebugMsg('Peephole RedundantMov performed', p);
 
-                        result:=RemoveCurrentP(taicpu(p));
+                        result:=RemoveCurrentP(p);
                       end
                     {
                       Turn
@@ -870,7 +872,7 @@ Implementation
                         asml.remove(hp2);
                         hp2.free;
 
-                        result:=RemoveCurrentP(taicpu(p));
+                        result:=RemoveCurrentP(p);
                       end
                     {
                       Turn
@@ -913,7 +915,7 @@ Implementation
                             dealloc.Free;
                           end;
 
-                        result:=RemoveCurrentP(taicpu(p));
+                        result:=RemoveCurrentP(p);
 
                         asml.remove(hp2);
                         hp2.free;
@@ -968,7 +970,7 @@ Implementation
                         begin
                           DebugMsg('Peephole MovMov2Mov performed', p);
 
-                          result:=RemoveCurrentP(taicpu(p));
+                          result:=RemoveCurrentP(p);
 
                           GetNextInstruction(hp1,hp1);
                           if not assigned(hp1) then

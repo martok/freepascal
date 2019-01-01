@@ -1489,8 +1489,12 @@ implementation
         sign         : tdwarf_type;
         signform     : tdwarf_form;
         fullbytesize : byte;
+        ordtype      : tordtype;
       begin
-        case def.ordtype of
+        ordtype:=def.ordtype;
+        if ordtype=customint then
+          ordtype:=range_to_basetype(def.low,def.high);
+        case ordtype of
           s8bit,
           s16bit,
           s32bit,
@@ -1524,7 +1528,7 @@ implementation
                     basedef:=s16inttype
                   else
                     basedef:=u16inttype;
-                4:
+                3,4:
                   if (sign=DW_ATE_signed) then
                     basedef:=s32inttype
                   else
@@ -1596,10 +1600,19 @@ implementation
                 ]);
               finish_entry;
             end;
-          pasbool8 :
+          pasbool1 :
             begin
               append_entry(DW_TAG_base_type,false,[
                 DW_AT_name,DW_FORM_string,'Boolean'#0,
+                DW_AT_encoding,DW_FORM_data1,DW_ATE_boolean,
+                DW_AT_byte_size,DW_FORM_data1,1
+                ]);
+              finish_entry;
+            end;
+          pasbool8 :
+            begin
+              append_entry(DW_TAG_base_type,false,[
+                DW_AT_name,DW_FORM_string,'Boolean8'#0,
                 DW_AT_encoding,DW_FORM_data1,DW_ATE_boolean,
                 DW_AT_byte_size,DW_FORM_data1,1
                 ]);
@@ -2252,7 +2265,7 @@ implementation
 
       var
         procendlabel   : tasmlabel;
-        procentry      : string;
+        procentry,s    : string;
         cc             : Tdwarf_calling_convention;
         st             : tsymtable;
         vmtoffset      : pint;
@@ -2304,6 +2317,19 @@ implementation
         else
           append_entry(DW_TAG_subprogram,true,
             [DW_AT_name,DW_FORM_string,def.mangledname+#0]);
+
+        if (ds_dwarf_cpp in current_settings.debugswitches) and (def.owner.symtabletype in [objectsymtable,recordsymtable]) then
+          begin
+            { If C++ emulation is enabled, add DW_AT_linkage_name attribute for methods.
+              LLDB uses it to display fully qualified method names.
+              Add a simple C++ mangled name without params to achieve at least "Class::Method()"
+              instead of just "Method" in LLDB. }
+            s:=tabstractrecorddef(def.owner.defowner).objrealname^;
+            procentry:=Format('_ZN%d%s', [Length(s), s]);
+            s:=symname(def.procsym, false);
+            procentry:=Format('%s%d%sEv'#0, [procentry, Length(s), s]);
+            append_attribute(DW_AT_linkage_name,DW_FORM_string, [procentry]);
+          end;
 
         append_proc_frame_base(list,def);
 
@@ -2487,7 +2513,7 @@ implementation
             sl_absolutetype,
             sl_typeconv:
               begin
-                currdef:=tfieldvarsym(symlist^.sym).vardef;
+                currdef:=symlist^.def;
                 { ignore, these don't change the address }
               end;
             sl_vec:
@@ -2534,7 +2560,7 @@ implementation
         blocksize,size_of_int : longint;
         tag : tdwarf_tag;
         has_high_reg : boolean;
-        dreg,dreghigh : byte;
+        dreg,dreghigh : shortint;
 {$ifdef i8086}
         has_segment_sym_name : boolean=false;
         segment_sym_name : TSymStr='';
@@ -2565,15 +2591,19 @@ implementation
           LOC_FPUREGISTER,
           LOC_CFPUREGISTER :
             begin
-              dreg:=dwarf_reg(sym.localloc.register);
+              { dwarf_reg_no_error might return -1
+                in case the register variable has been optimized out }
+              dreg:=dwarf_reg_no_error(sym.localloc.register);
               has_high_reg:=(sym.localloc.loc in [LOC_REGISTER,LOC_CREGISTER]) and (sym.localloc.registerhi<>NR_NO);
               if has_high_reg then
-                dreghigh:=dwarf_reg(sym.localloc.registerhi);
+                dreghigh:=dwarf_reg_no_error(sym.localloc.registerhi);
+              if dreghigh=-1 then
+                has_high_reg:=false;
               if (sym.localloc.loc in [LOC_REGISTER,LOC_CREGISTER]) and
                  (sym.typ=paravarsym) and
                   paramanager.push_addr_param(sym.varspez,sym.vardef,tprocdef(sym.owner.defowner).proccalloption) and
                   not(vo_has_local_copy in sym.varoptions) and
-                  not is_open_string(sym.vardef) then
+                  not is_open_string(sym.vardef) and (dreg>=0) then
                 begin
                   templist.concat(tai_const.create_8bit(ord(DW_OP_bregx)));
                   templist.concat(tai_const.create_uleb128bit(dreg));
@@ -2599,7 +2629,7 @@ implementation
                       templist.concat(tai_const.create_uleb128bit(size_of_int));
                       blocksize:=blocksize+1+Lengthuleb128(size_of_int);
                     end
-                  else
+                  else if (dreg>=0) then
                     begin
                       templist.concat(tai_const.create_8bit(ord(DW_OP_regx)));
                       templist.concat(tai_const.create_uleb128bit(dreg));
@@ -3774,10 +3804,12 @@ implementation
                     asmline.concat(tai_comment.Create(strpnew('['+tostr(currfileinfo.line)+':'+tostr(currfileinfo.column)+']')));
 
                     if (prevlabel = nil) or
-                       { darwin's assembler cannot create an uleb128 of the difference }
-                       { between to symbols                                            }
-                       { same goes for Solaris native assembler                        }
-                       (target_info.system in systems_darwin) or
+                       { darwin's assembler cannot create an uleb128 of the difference
+                         between to symbols
+                         same goes for Solaris native assembler
+                         ... and riscv }
+
+                       (target_info.system in systems_darwin+[system_riscv32_linux,system_riscv64_linux]) or
                        (target_asm.id=as_solaris_as) then
                       begin
                         asmline.concat(tai_const.create_8bit(DW_LNS_extended_op));
@@ -4284,6 +4316,13 @@ implementation
         end;
 
       begin
+        if (ds_dwarf_cpp in current_settings.debugswitches) then
+          begin
+            // At least LLDB 6.0.0 does not like this implementation of string types.
+            // Call the inherited DWARF 2 implementation, which works fine.
+            inherited;
+            exit;
+          end;
         case def.stringtype of
           st_shortstring:
             begin

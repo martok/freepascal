@@ -60,7 +60,11 @@ unit Pas2JsFiler;
 interface
 
 uses
-  Classes, Types, SysUtils, contnrs, zstream, AVL_Tree,
+  Classes, Types, SysUtils, contnrs,
+  {$ifdef pas2js}
+  {$else}
+  zstream, AVL_Tree,
+  {$endif}
   fpjson, jsonparser, jsonscanner,
   PasTree, PScanner, PParser, PasResolveEval, PasResolver,
   Pas2jsFileUtils, FPPas2Js;
@@ -163,7 +167,8 @@ const
     'ArrayOperators',
     'ExternalClass',
     'PrefixedAttributes',
-    'IgnoreAttributes'
+    'IgnoreAttributes',
+    'OmitRTTI'
     );
 
   PCUDefaultBoolSwitches: TBoolSwitches = [
@@ -211,7 +216,10 @@ const
     'UseStrict',
     'NoTypeInfo',
     'EliminateDeadCode',
-    'StoreImplJS'
+    'StoreImplJS',
+    'RTLVersionCheckMain',
+    'RTLVersionCheckSystem',
+    'RTLVersionCheckUnit'
     );
 
   PCUDefaultTargetPlatform = PlatformBrowser;
@@ -287,7 +295,8 @@ const
     'List',
     'Inherited',
     'Self',
-    'Specialize');
+    'Specialize',
+    'Procedure');
 
   PCUExprOpCodeNames: array[TExprOpCode] of string = (
     'None',
@@ -622,10 +631,13 @@ type
   { TPCUCustomReader }
 
   TPCUCustomReader = class(TPCUFiler)
+  private
+    FSourceFilename: string;
   public
     procedure ReadPCU(aResolver: TPas2JSResolver; aStream: TStream); virtual; abstract;
     function ReadContinue: boolean; virtual; abstract;  // true=finished
     function ReadCanContinue: boolean; virtual; // true=not finished and no pending used interface
+    property SourceFilename: string read FSourceFilename write FSourceFilename; // default value for TPasElement.SourceFilename
   end;
   TPCUReaderClass = class of TPCUCustomReader;
 
@@ -1029,10 +1041,10 @@ function ComparePCUSrcFiles(File1, File2: Pointer): integer;
 function ComparePCUFilerElementRef(Ref1, Ref2: Pointer): integer;
 function CompareElWithPCUFilerElementRef(El, Ref: Pointer): integer;
 
-function EncodeVLQ(i: MaxPrecInt): string; overload;
-function EncodeVLQ(i: MaxPrecUInt): string; overload;
-function DecodeVLQ(const s: string): MaxPrecInt; // base256 Variable Length Quantity
-function DecodeVLQ(var p: PByte): MaxPrecInt; // base256 Variable Length Quantity
+function EncodeVLQ(i: TMaxPrecInt): string; overload;
+function EncodeVLQ(i: TMaxPrecUInt): string; overload;
+function DecodeVLQ(const s: string): TMaxPrecInt; // base256 Variable Length Quantity
+function DecodeVLQ(var p: PByte): TMaxPrecInt; // base256 Variable Length Quantity
 
 function ComputeChecksum(p: PChar; Cnt: integer): TPCUSourceFileChecksum;
 function crc32(crc: cardinal; buf: Pbyte; len: cardinal): cardinal;
@@ -1080,7 +1092,7 @@ begin
   Result:=ComparePointer(Element,Reference.Element);
 end;
 
-function EncodeVLQ(i: MaxPrecInt): string;
+function EncodeVLQ(i: TMaxPrecInt): string;
 { Convert signed number to base256-VLQ:
   Each byte has 8bit, where the least significant bit is the continuation bit
   (1=there is a next byte).
@@ -1098,9 +1110,9 @@ begin
   digits:=0;
   if i<0 then
     begin
-    if i=Low(MaxPrecInt) then
+    if i=Low(TMaxPrecInt) then
       begin
-      Result:=EncodeVLQ(High(MaxPrecInt)+1);
+      Result:=EncodeVLQ(High(TMaxPrecInt)+1);
       Result[1]:=chr(ord(Result[1]) or 1);
       exit;
       end;
@@ -1122,7 +1134,7 @@ begin
     end;
 end;
 
-function EncodeVLQ(i: MaxPrecUInt): string;
+function EncodeVLQ(i: TMaxPrecUInt): string;
 var
   digits: integer;
 begin
@@ -1141,7 +1153,7 @@ begin
     end;
 end;
 
-function DecodeVLQ(const s: string): MaxPrecInt;
+function DecodeVLQ(const s: string): TMaxPrecInt;
 var
   p: PByte;
 begin
@@ -1153,7 +1165,7 @@ begin
     raise EConvertError.Create('DecodeVLQ waste');
 end;
 
-function DecodeVLQ(var p: PByte): MaxPrecInt;
+function DecodeVLQ(var p: PByte): TMaxPrecInt;
 { Convert base256-VLQ to signed number,
   For the fomat see EncodeVLQ
 }
@@ -1164,7 +1176,7 @@ function DecodeVLQ(var p: PByte): MaxPrecInt;
   end;
 
 const
-  MaxShift = 63; // actually log2(High(MaxPrecInt))
+  MaxShift = 63; // actually log2(High(TMaxPrecInt))
 var
   digit, Shift: Integer;
   Negated: Boolean;
@@ -1180,7 +1192,7 @@ begin
     inc(p);
     if Shift>MaxShift then
       RaiseInvalid;
-    inc(Result,MaxPrecInt(digit and %1111111) shl Shift);
+    inc(Result,TMaxPrecInt(digit and %1111111) shl Shift);
     inc(Shift,7);
     end;
   if Negated then
@@ -2118,7 +2130,7 @@ begin
   WriteModeSwitches(Obj,'FinalModeSwitches',Scanner.CurrentModeSwitches,InitialFlags.Modeswitches);
   WriteBoolSwitches(Obj,'FinalBoolSwitches',Scanner.CurrentBoolSwitches,InitialFlags.BoolSwitches);
   if InitialFlags.ConverterOptions<>Converter.Options then
-    RaiseMsg(20180314185555);
+    RaiseMsg(20180314185555,'InitialFlags='+dbgs(InitialFlags.ConverterOptions)+' Converter='+dbgs(Converter.Options));
   // ToDo: write final flags: used defines, used macros
 end;
 
@@ -3771,6 +3783,7 @@ begin
           Arr.Add(Scope.GlobalJS[i]);
         end;
       Obj.Add('Body',Scope.BodyJS);
+      Obj.Add('Empty',Scope.EmptyJS);
       end;
     end;
   if (Scope.BodyJS<>'') and (Scope.ImplProc<>nil) then
@@ -5468,6 +5481,7 @@ function TPCUReader.CreateElement(AClass: TPTreeElement; const AName: String;
   AParent: TPasElement): TPasElement;
 begin
   Result:=AClass.Create(AName,AParent);
+  Result.SourceFilename:=SourceFilename;
   {$IFDEF CheckPasTreeRefCount}Result.RefIds.Add('CreateElement');{$ENDIF}
 end;
 
@@ -7347,6 +7361,7 @@ begin
     RaiseMsg(20180228231511,El);
   if not ReadString(Obj,'Body',s,El) then
     RaiseMsg(20180228131232,El);
+  ReadBoolean(Obj,'Empty',ImplScope.EmptyJS,El);
   ImplScope.BodyJS:=s;
   if ReadArray(Obj,'Globals',Arr,El) then
     begin
@@ -7838,9 +7853,7 @@ end;
 
 initialization
   PrecompileFormats:=TPas2JSPrecompileFormats.Create;
-  {$IFDEF EnablePas2jsPrecompiled}
-  PrecompileFormats.Add('pcu','all used units must be pcu too',TPCUReader,TPCUWriter);
-  {$ENDIF}
+  PrecompileFormats.Add('pcu','all used pcu must match exactly',TPCUReader,TPCUWriter);
 finalization
   PrecompileFormats.Free;
   PrecompileFormats:=nil;

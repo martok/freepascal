@@ -17,7 +17,7 @@
     ./testpas2js --suite=TTestModule.TestEmptyProgram
     ./testpas2js --suite=TTestModule.TestEmptyUnit
 }
-unit tcmodules;
+unit TCModules;
 
 {$mode objfpc}{$H+}
 
@@ -76,7 +76,7 @@ type
     FOnFindUnit: TOnFindUnit;
     FParser: TTestPasParser;
     FStreamResolver: TStreamResolver;
-    FScanner: TPascalScanner;
+    FScanner: TPas2jsPasScanner;
     FSource: string;
   public
     destructor Destroy; override;
@@ -86,7 +86,7 @@ type
     property OnFindUnit: TOnFindUnit read FOnFindUnit write FOnFindUnit;
     property Filename: string read FFilename write FFilename;
     property StreamResolver: TStreamResolver read FStreamResolver write FStreamResolver;
-    property Scanner: TPascalScanner read FScanner write FScanner;
+    property Scanner: TPas2jsPasScanner read FScanner write FScanner;
     property Parser: TTestPasParser read FParser write FParser;
     property Source: string read FSource write FSource;
     property Module: TPasModule read FModule;
@@ -119,7 +119,7 @@ type
     FHintMsgs: TObjectList; // list of TTestHintMessage
     FHintMsgsGood: TFPList; // list of TTestHintMessage marked as expected
     FJSRegModuleCall: TJSCallExpression;
-    FScanner: TPascalScanner;
+    FScanner: TPas2jsPasScanner;
     FSkipTests: boolean;
     FSource: TStringList;
     FFirstPasStatement: TPasImplBlock;
@@ -138,7 +138,7 @@ type
     procedure SetUp; override;
     function CreateConverter: TPasToJSConverter; virtual;
     function LoadUnit(const aUnitName: String): TPasModule;
-    procedure InitScanner(aScanner: TPascalScanner); virtual;
+    procedure InitScanner(aScanner: TPas2jsPasScanner); virtual;
     procedure TearDown; override;
     Procedure Add(Line: string); virtual;
     Procedure Add(const Lines: array of string);
@@ -210,7 +210,7 @@ type
     destructor Destroy; override;
     property Source: TStringList read FSource;
     property FileResolver: TStreamResolver read FFileResolver;
-    property Scanner: TPascalScanner read FScanner;
+    property Scanner: TPas2jsPasScanner read FScanner;
     property Parser: TTestPasParser read FParser;
     property MsgCount: integer read GetMsgCount;
     property Msgs[Index: integer]: TTestHintMessage read GetMsgs;
@@ -232,6 +232,7 @@ type
     Procedure Test_ModeSwitchCBlocksFail;
     Procedure TestUnit_UseSystem;
     Procedure TestUnit_Intf1Impl2Intf1;
+    Procedure TestIncludeVersion;
 
     // vars/const
     Procedure TestVarInt;
@@ -262,8 +263,7 @@ type
     // strings
     Procedure TestCharConst;
     Procedure TestChar_Compare;
-    Procedure TestChar_Ord;
-    Procedure TestChar_Chr;
+    Procedure TestChar_BuiltInProcs;
     Procedure TestStringConst;
     Procedure TestStringConstSurrogate;
     Procedure TestString_Length;
@@ -327,6 +327,16 @@ type
     Procedure TestProc_LocalVarAbsolute;
     Procedure TestProc_ReservedWords;
 
+    // anonymous functions
+    Procedure TestAnonymousProc_Assign_ObjFPC;
+    Procedure TestAnonymousProc_Assign_Delphi;
+    Procedure TestAnonymousProc_Arg;
+    Procedure TestAnonymousProc_Typecast;
+    Procedure TestAnonymousProc_With;
+    Procedure TestAnonymousProc_ExceptOn;
+    Procedure TestAnonymousProc_Nested;
+    Procedure TestAnonymousProc_NestedAssignResult;
+
     // enums, sets
     Procedure TestEnum_Name;
     Procedure TestEnum_Number;
@@ -336,6 +346,7 @@ type
     Procedure TestEnumRange_Array;
     Procedure TestEnum_ForIn;
     Procedure TestEnum_ScopedNumber;
+    Procedure TestEnum_InFunction;
     Procedure TestSet_Enum;
     Procedure TestSet_Operators;
     Procedure TestSet_Operator_In;
@@ -350,6 +361,7 @@ type
     Procedure TestSet_ConstEnum;
     Procedure TestSet_ConstChar;
     Procedure TestSet_ConstInt;
+    Procedure TestSet_InFunction;
     Procedure TestSet_ForIn;
 
     // statements
@@ -361,6 +373,7 @@ type
     Procedure TestBitwiseOperators;
     Procedure TestFunctionInt;
     Procedure TestFunctionString;
+    Procedure TestIfThen;
     Procedure TestForLoop;
     Procedure TestForLoopInsideFunction;
     Procedure TestForLoop_ReadVarAfter;
@@ -371,6 +384,7 @@ type
     Procedure TestTryFinally;
     Procedure TestTryExcept;
     Procedure TestTryExcept_ReservedWords;
+    Procedure TestIfThenRaiseElse;
     Procedure TestCaseOf;
     Procedure TestCaseOf_UseSwitch;
     Procedure TestCaseOfNoElse;
@@ -378,6 +392,7 @@ type
     Procedure TestCaseOfRange;
     Procedure TestCaseOfString;
     Procedure TestCaseOfExternalClassConst;
+    Procedure TestDebugger;
 
     // arrays
     Procedure TestArray_Dynamic;
@@ -387,7 +402,9 @@ type
     Procedure TestArray_StaticBool;
     Procedure TestArray_StaticChar;
     Procedure TestArray_StaticMultiDim;
+    Procedure TestArray_StaticInFunction;
     Procedure TestArrayOfRecord;
+    Procedure TestArray_StaticRecord;
     Procedure TestArrayOfSet;
     // call(set)  literal and clone var
     // call([set])   literal and clone var
@@ -416,7 +433,7 @@ type
     Procedure TestRecord_Empty;
     Procedure TestRecord_Var;
     Procedure TestRecord_VarExternal;
-    Procedure TestWithRecordDo;
+    Procedure TestRecord_WithDo;
     Procedure TestRecord_Assign;
     Procedure TestRecord_PassAsArgClone;
     Procedure TestRecord_AsParams;
@@ -429,6 +446,16 @@ type
     Procedure TestRecord_FieldArray;
     Procedure TestRecord_Const;
     Procedure TestRecord_TypecastFail;
+    Procedure TestRecord_InFunction;
+    // ToDo: RTTI of local record
+    // ToDo: pcu local record, name clash and rtti
+
+    // advanced record
+    // ToDo: TestAdvRecord_Function;
+    // ToDo: TestAdvRecord_Property;
+    // ToDo: TestAdvRecord_PropertyDefault;
+    // ToDo: TestAdvRecord_InFunction;
+    // ToDo: pcu: record default property
 
     // classes
     Procedure TestClass_TObjectDefaultConstructor;
@@ -440,10 +467,11 @@ type
     Procedure TestClass_Inheritance;
     Procedure TestClass_TypeAlias;
     Procedure TestClass_AbstractMethod;
-    Procedure TestClass_CallInherited_NoParams;
+    Procedure TestClass_CallInherited_ProcNoParams;
     Procedure TestClass_CallInherited_WithParams;
     Procedure TestClasS_CallInheritedConstructor;
-    Procedure TestClass_ClassVar;
+    Procedure TestClass_ClassVar_Assign;
+    //ToDo Procedure TestClass_ClassVar_Arg;
     Procedure TestClass_CallClassMethod;
     Procedure TestClass_Property;
     Procedure TestClass_Property_ClassMethod;
@@ -514,7 +542,9 @@ type
     Procedure TestExternalClass_FunctionResultInTypeCast;
     Procedure TestExternalClass_NonExternalOverride;
     Procedure TestExternalClass_OverloadHint;
+    Procedure TestExternalClass_SameNamePublishedProperty;
     Procedure TestExternalClass_Property;
+    Procedure TestExternalClass_PropertyDate;
     Procedure TestExternalClass_ClassProperty;
     Procedure TestExternalClass_ClassOf;
     Procedure TestExternalClass_ClassOtherUnit;
@@ -561,6 +591,7 @@ type
     Procedure TestClassInterface_ImplReintroduce;
     Procedure TestClassInterface_MethodResolution;
     Procedure TestClassInterface_AncestorMoreInterfaces;
+    Procedure TestClassInterface_MethodOverride;
     Procedure TestClassInterface_Corba_Delegation;
     Procedure TestClassInterface_Corba_DelegationStatic;
     Procedure TestClassInterface_Corba_Operators;
@@ -670,6 +701,7 @@ type
     Procedure TestRTTI_Class_Property;
     Procedure TestRTTI_Class_PropertyParams;
     Procedure TestRTTI_Class_OtherUnit_TypeAlias;
+    Procedure TestRTTI_Class_OmitRTTI;
     Procedure TestRTTI_IndexModifier;
     Procedure TestRTTI_StoredModifier;
     Procedure TestRTTI_DefaultValue;
@@ -773,7 +805,7 @@ begin
     aJSWriter:=TJSWriter.Create(aWriter);
     aJSWriter.IndentSize:=2;
     aJSWriter.WriteJS(El);
-    Result:=aWriter.AsAnsistring;
+    Result:=aWriter.AsString;
   finally
     aJSWriter.Free;
     aWriter.Free;
@@ -1070,9 +1102,9 @@ end;
 procedure TCustomTestModule.OnScannerLog(Sender: TObject; const Msg: String);
 var
   Item: TTestHintMessage;
-  aScanner: TPascalScanner;
+  aScanner: TPas2jsPasScanner;
 begin
-  aScanner:=Sender as TPascalScanner;
+  aScanner:=Sender as TPas2jsPasScanner;
   Item:=TTestHintMessage.Create;
   Item.Id:=aScanner.LastMsgNumber;
   Item.MsgType:=aScanner.LastMsgType;
@@ -1113,7 +1145,7 @@ begin
       CurEngine.StreamResolver.OwnsStreams:=True;
       //writeln('TTestModule.FindUnit SOURCE=',CurEngine.Source);
       CurEngine.StreamResolver.AddStream(CurEngine.FileName,TStringStream.Create(CurEngine.Source));
-      CurEngine.Scanner:=TPascalScanner.Create(CurEngine.StreamResolver);
+      CurEngine.Scanner:=TPas2jsPasScanner.Create(CurEngine.StreamResolver);
       InitScanner(CurEngine.Scanner);
       CurEngine.Parser:=TTestPasParser.Create(CurEngine.Scanner,CurEngine.StreamResolver,CurEngine);
       CurEngine.Parser.Options:=po_tcmodules;
@@ -1155,11 +1187,12 @@ begin
   FFileResolver:=TStreamResolver.Create;
   FFileResolver.OwnsStreams:=True;
 
-  FScanner:=TPascalScanner.Create(FFileResolver);
+  FScanner:=TPas2jsPasScanner.Create(FFileResolver);
   InitScanner(FScanner);
 
   FEngine:=AddModule(Filename);
   FEngine.Scanner:=FScanner;
+  FScanner.Resolver:=FEngine;
 
   FParser:=TTestPasParser.Create(FScanner,FFileResolver,FEngine);
   FParser.OnLog:=@OnParserLog;
@@ -1176,9 +1209,10 @@ function TCustomTestModule.CreateConverter: TPasToJSConverter;
 begin
   Result:=TPasToJSConverter.Create;
   Result.Options:=co_tcmodules;
+  Result.Globals:=TPasToJSConverterGlobals.Create(Result);
 end;
 
-procedure TCustomTestModule.InitScanner(aScanner: TPascalScanner);
+procedure TCustomTestModule.InitScanner(aScanner: TPas2jsPasScanner);
 begin
   aScanner.AllowedModeSwitches:=msAllPas2jsModeSwitches;
   aScanner.ReadOnlyModeSwitches:=msAllPas2jsModeSwitchesReadOnly;
@@ -1189,6 +1223,8 @@ begin
   aScanner.CurrentBoolSwitches:=msAllPas2jsBoolSwitchesReadOnly+[bsHints,bsNotes,bsWarnings,bsWriteableConst];
 
   aScanner.OnLog:=@OnScannerLog;
+
+  aScanner.CompilerVersion:='Comp.Ver.tcmodules';
 end;
 
 procedure TCustomTestModule.TearDown;
@@ -1746,9 +1782,9 @@ begin
     if (Item.MsgNumber<>MsgNumber) or (Item.Msg<>Msg) then continue;
     if (Marker<>nil) then
       begin
-      if Item.SourcePos.Row<>Marker^.Row then continue;
-      if (Item.SourcePos.Column<Marker^.StartCol)
-          or (Item.SourcePos.Column>Marker^.EndCol) then continue;
+      if Item.SourcePos.Row<>cardinal(Marker^.Row) then continue;
+      if (Item.SourcePos.Column<cardinal(Marker^.StartCol))
+          or (Item.SourcePos.Column>cardinal(Marker^.EndCol)) then continue;
       end;
     // found
     FHintMsgsGood.Add(Item);
@@ -2246,6 +2282,40 @@ begin
     '']) );
 end;
 
+procedure TTestModule.TestIncludeVersion;
+begin
+  StartProgram(false);
+  Add([
+  'var',
+  '  s: string;',
+  '  i: word;',
+  'begin',
+  '  s:={$I %line%};',
+  '  i:={$I %linenum%};',
+  '  s:={$I %currentroutine%};',
+  '  s:={$I %pas2jsversion%};',
+  '  s:={$I %pas2jstarget%};',
+  '  s:={$I %pas2jstargetos%};',
+  '  s:={$I %pas2jstargetcpu%};',
+  '  s:={$I %file%};',
+  '']);
+  ConvertProgram;
+  CheckSource('TestIncludeVersion',
+    LinesToStr([
+    'this.s="";',
+    'this.i = 0;']),
+    LinesToStr([
+    '$mod.s = "7";',
+    '$mod.i = 8;',
+    '$mod.s = "<anonymous>";',
+    '$mod.s = "Comp.Ver.tcmodules";',
+    '$mod.s = "Browser";',
+    '$mod.s = "Browser";',
+    '$mod.s = "ECMAScript5";',
+    '$mod.s = "test1.pp";',
+    '']));
+end;
+
 procedure TTestModule.TestVarInt;
 begin
   StartProgram(false);
@@ -2390,6 +2460,8 @@ begin
   '  c:=char(c);',
   '  c:=char(i);',
   '  c:=char(65);',
+  '  c:=char(#10);',
+  '  c:=char(#$E000);',
   '']);
   ConvertProgram;
   CheckSource('TestAliasTypeRef',
@@ -2412,6 +2484,8 @@ begin
     '$mod.c = $mod.c;',
     '$mod.c = String.fromCharCode($mod.i);',
     '$mod.c = "A";',
+    '$mod.c = "\n";',
+    '$mod.c = "";',
     '']));
 end;
 
@@ -2634,7 +2708,7 @@ begin
     '$mod.vB = $mod.vA + $mod.vA;',
     '$mod.vB = Math.floor($mod.vA / $mod.vB);',
     '$mod.vB = $mod.vA % $mod.vB;',
-    '$mod.vB = ($mod.vA + ($mod.vA * $mod.vB)) + Math.floor($mod.vA / $mod.vB);',
+    '$mod.vB = $mod.vA + ($mod.vA * $mod.vB) + Math.floor($mod.vA / $mod.vB);',
     '$mod.vC = -$mod.vA;',
     '$mod.vA = $mod.vA - $mod.vB;',
     '$mod.vB = $mod.vA;',
@@ -2847,13 +2921,13 @@ begin
     '  function Nesty(pA) {',
     '    var Result$1 = 0;',
     '    var vB = 0;',
-    '    Result$1 = (((pA + vB) + vC) + pD) + $mod.vInUnit;',
+    '    Result$1 = pA + vB + vC + pD + $mod.vInUnit;',
     '    Result$1 = 3;',
     '    Result = 4;',
     '    return Result$1;',
     '    return Result$1;',
     '  };',
-    '  Result = (pA + vB) + vC;',
+    '  Result = pA + vB + vC;',
     '  Result = 6;',
     '  return Result;',
     '  return Result;',
@@ -3277,6 +3351,14 @@ begin
   '  { a:{ b:{}, c:[]}, d:''1'' };',
   '  end;',
   '  asm console.log(); end;',
+  '  asm',
+  '    s = "'' ";',
+  '    s = ''" '';',
+  '    s = s + "world" + "''";',
+  '    // end',
+  '    s = ''end'';',
+  '    s = "end";',
+  '  end;',
   'end;',
   'begin']);
   ConvertProgram;
@@ -3286,6 +3368,12 @@ begin
     '  var Result = 0;',
     '  { a:{ b:{}, c:[]}, d:''1'' };',
     '  console.log();',
+    '  s = "'' ";',
+    '  s = ''" '';',
+    '  s = s + "world" + "''";',
+    '  // end',
+    '  s = ''end'';',
+    '  s = "end";',
     '  return Result;',
     '};'
     ]),
@@ -3769,7 +3857,7 @@ begin
     'this.B = 3 + 1;',
     'var C = 3 + 1;',
     'var D = 4 + 1;',
-    'var E = ((5 + 4) + 4) + 3;',
+    'var E = 5 + 4 + 4 + 3;',
     'this.DoIt = function () {',
     '};',
     '']),
@@ -3823,16 +3911,25 @@ begin
   'type',
   '  TObject = class',
   '    Index: longint;',
+  '    procedure DoAbs(Item: pointer);',
   '  end;',
-  'procedure DoIt(i: longint);',
+  'procedure TObject.DoAbs(Item: pointer);',
+  'var',
+  '  o: TObject absolute Item;',
+  'begin',
+  '  if o.Index<o.Index then o.Index:=o.Index;',
+  'end;',
+  'procedure DoIt(i: longint; p: pointer);',
   'var',
   '  d: double absolute i;',
   '  s: string absolute d;',
-  '  o: TObject absolute i;',
+  '  oi: TObject absolute i;',
+  '  op: TObject absolute p;',
   'begin',
   '  if d=d then d:=d;',
   '  if s=s then s:=s;',
-  '  if o.Index<o.Index then o.Index:=o.Index;',
+  '  if oi.Index<oi.Index then oi.Index:=oi.Index;',
+  '  if op.Index=op.Index then op.Index:=op.Index;',
   'end;',
   'begin']);
   ConvertProgram;
@@ -3844,11 +3941,15 @@ begin
     '  };',
     '  this.$final = function () {',
     '  };',
+    '  this.DoAbs = function (Item) {',
+    '    if (Item.Index < Item.Index) Item.Index = Item.Index;',
+    '  };',
     '});',
-    'this.DoIt = function (i) {',
+    'this.DoIt = function (i, p) {',
     '  if (i === i) i = i;',
     '  if (i === i) i = i;',
     '  if (i.Index < i.Index) i.Index = i.Index;',
+    '  if (p.Index === p.Index) p.Index = p.Index;',
     '};'
     ]),
     LinesToStr([
@@ -3886,6 +3987,396 @@ begin
     LinesToStr([
     '  $mod.Date(1);'
     ]));
+end;
+
+procedure TTestModule.TestAnonymousProc_Assign_ObjFPC;
+begin
+  StartProgram(false);
+  Add([
+  '{$mode objfpc}',
+  'type',
+  '  TFunc = reference to function(x: word): word;',
+  'var Func: TFunc;',
+  'procedure DoIt(a: word);',
+  'begin',
+  '  Func:=function(b:word): word',
+  '  begin',
+  '    Result:=a+b;',
+  '    exit(b);',
+  '    exit(Result);',
+  '  end;',// test semicolon
+  '  a:=3;',
+  'end;',
+  'begin',
+  '  Func:=function(c:word):word begin',
+  '    Result:=3+c;',
+  '    exit(c);',
+  '    exit(Result);',
+  '  end;']);
+  ConvertProgram;
+  CheckSource('TestAnonymousProc_Assign_ObjFPC',
+    LinesToStr([ // statements
+    'this.Func = null;',
+    'this.DoIt = function (a) {',
+    '  $mod.Func = function (b) {',
+    '    var Result = 0;',
+    '    Result = a + b;',
+    '    return b;',
+    '    return Result;',
+    '    return Result;',
+    '  };',
+    '  a = 3;',
+    '};',
+    '']),
+    LinesToStr([
+    '$mod.Func = function (c) {',
+    '  var Result = 0;',
+    '  Result = 3 + c;',
+    '  return c;',
+    '  return Result;',
+    '  return Result;',
+    '};',
+    '']));
+end;
+
+procedure TTestModule.TestAnonymousProc_Assign_Delphi;
+begin
+  StartProgram(false);
+  Add([
+  '{$mode delphi}',
+  'type',
+  '  TProc = reference to procedure(x: word);',
+  'procedure DoIt(a: word);',
+  'var Proc: TProc;',
+  'begin',
+  '  Proc:=procedure(b:word) begin end;',
+  'end;',
+  'var Proc: TProc;',
+  'begin',
+  '  Proc:=procedure(c:word) begin end;',
+  '']);
+  ConvertProgram;
+  CheckSource('TestAnonymousProc_Assign_Delphi',
+    LinesToStr([ // statements
+    'this.DoIt = function (a) {',
+    '  var Proc = null;',
+    '  Proc = function (b) {',
+    '  };',
+    '};',
+    'this.Proc = null;',
+    '']),
+    LinesToStr([
+    '$mod.Proc = function (c) {',
+    '};',
+    '']));
+end;
+
+procedure TTestModule.TestAnonymousProc_Arg;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TProc = reference to procedure;',
+  '  TFunc = reference to function(x: word): word;',
+  'procedure DoMore(f,g: TProc);',
+  'begin',
+  'end;',
+  'procedure DoOdd(v: jsvalue);',
+  'begin',
+  'end;',
+  'procedure DoIt(f: TFunc);',
+  'begin',
+  '  DoIt(function(b:word): word',
+  '    begin',
+  '      Result:=1+b;',
+  '    end);',
+  '  DoMore(procedure begin end, procedure begin end);',
+  '  DoOdd(procedure begin end);',
+  'end;',
+  'begin',
+  '  DoMore(procedure begin end,',
+  '    procedure assembler asm',
+  '      console.log("c");',
+  '    end);',
+  '']);
+  ConvertProgram;
+  CheckSource('TestAnonymousProc_Arg',
+    LinesToStr([ // statements
+    'this.DoMore = function (f, g) {',
+    '};',
+    'this.DoOdd = function (v) {',
+    '};',
+    'this.DoIt = function (f) {',
+    '  $mod.DoIt(function (b) {',
+    '    var Result = 0;',
+    '    Result = 1 + b;',
+    '    return Result;',
+    '  });',
+    '  $mod.DoMore(function () {',
+    '  }, function () {',
+    '  });',
+    '  $mod.DoOdd(function () {',
+    '  });',
+    '};',
+    '']),
+    LinesToStr([
+    '$mod.DoMore(function () {',
+    '}, function () {',
+    '  console.log("c");',
+    '});',
+    '']));
+end;
+
+procedure TTestModule.TestAnonymousProc_Typecast;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TProc = reference to procedure(w: word);',
+  '  TArr = array of word;',
+  '  TFuncArr = reference to function: TArr;',
+  'procedure DoIt(p: TProc);',
+  'var',
+  '  w: word;',
+  '  a: TArr;',
+  'begin',
+  '  p:=TProc(procedure(b: smallint) begin end);',
+  '  a:=TFuncArr(function: TArr begin end)();',
+  '  w:=TFuncArr(function: TArr begin end)()[3];',
+  'end;',
+  'begin']);
+  ConvertProgram;
+  CheckSource('TestAnonymousProc_Typecast',
+    LinesToStr([ // statements
+    'this.DoIt = function (p) {',
+    '  var w = 0;',
+    '  var a = [];',
+    '  p = function (b) {',
+    '  };',
+    '  a = function () {',
+    '    var Result = [];',
+    '    return Result;',
+    '  }();',
+    '  w = function () {',
+    '    var Result = [];',
+    '    return Result;',
+    '  }()[3];',
+    '};',
+    '']),
+    LinesToStr([
+    '']));
+end;
+
+procedure TTestModule.TestAnonymousProc_With;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TProc = reference to procedure(w: word);',
+  '  TObject = class',
+  '    b: boolean;',
+  '  end;',
+  'var',
+  '  p: TProc;',
+  '  bird: TObject;',
+  'begin',
+  '  with bird do',
+  '    p:=procedure(w: word)',
+  '      begin',
+  '        b:=w>2;',
+  '      end;',
+  '']);
+  ConvertProgram;
+  CheckSource('TestAnonymousProc_With',
+    LinesToStr([ // statements
+    'rtl.createClass($mod, "TObject", null, function () {',
+    '  this.$init = function () {',
+    '    this.b = false;',
+    '  };',
+    '  this.$final = function () {',
+    '  };',
+    '});',
+    'this.p = null;',
+    'this.bird = null;',
+    '']),
+    LinesToStr([
+    'var $with1 = $mod.bird;',
+    '$mod.p = function (w) {',
+    '  $with1.b = w > 2;',
+    '};',
+    '']));
+end;
+
+procedure TTestModule.TestAnonymousProc_ExceptOn;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TProc = reference to procedure;',
+  '  TObject = class',
+  '    b: boolean;',
+  '  end;',
+  'procedure DoIt;',
+  'var',
+  '  p: TProc;',
+  'begin',
+  '  try',
+  '  except',
+  '    on E: TObject do',
+  '    p:=procedure',
+  '      begin',
+  '        E.b:=true;',
+  '      end;',
+  '  end;',
+  'end;',
+  'begin']);
+  ConvertProgram;
+  CheckSource('TestAnonymousProc_ExceptOn',
+    LinesToStr([ // statements
+    'rtl.createClass($mod, "TObject", null, function () {',
+    '  this.$init = function () {',
+    '    this.b = false;',
+    '  };',
+    '  this.$final = function () {',
+    '  };',
+    '});',
+    'this.DoIt = function () {',
+    '  var p = null;',
+    '  try {} catch ($e) {',
+    '    if ($mod.TObject.isPrototypeOf($e)) {',
+    '      var E = $e;',
+    '      p = function () {',
+    '        E.b = true;',
+    '      };',
+    '    } else throw $e',
+    '  };',
+    '};',
+    '']),
+    LinesToStr([
+    '']));
+end;
+
+procedure TTestModule.TestAnonymousProc_Nested;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TProc = reference to procedure;',
+  '  TObject = class',
+  '    i: byte;',
+  '    procedure DoIt;',
+  '  end;',
+  'procedure TObject.DoIt;',
+  'var',
+  '  p: TProc;',
+  '  procedure Sub;',
+  '  begin',
+  '    p:=procedure',
+  '      begin',
+  '        i:=3;',
+  '        Self.i:=4;',
+  '        p:=procedure',
+  '            procedure SubSub;',
+  '            begin',
+  '              i:=13;',
+  '              Self.i:=14;',
+  '            end;',
+  '          begin',
+  '            i:=13;',
+  '            Self.i:=14;',
+  '          end;',
+  '      end;',
+  '  end;',
+  'begin',
+  'end;',
+  'begin']);
+  ConvertProgram;
+  CheckSource('TestAnonymousProc_Nested',
+    LinesToStr([ // statements
+    'rtl.createClass($mod, "TObject", null, function () {',
+    '  this.$init = function () {',
+    '    this.i = 0;',
+    '  };',
+    '  this.$final = function () {',
+    '  };',
+    '  this.DoIt = function () {',
+    '    var Self = this;',
+    '    var p = null;',
+    '    function Sub() {',
+    '      p = function () {',
+    '        Self.i = 3;',
+    '        Self.i = 4;',
+    '        p = function () {',
+    '          function SubSub() {',
+    '            Self.i = 13;',
+    '            Self.i = 14;',
+    '          };',
+    '          Self.i = 13;',
+    '          Self.i = 14;',
+    '        };',
+    '      };',
+    '    };',
+    '  };',
+    '});',
+    '']),
+    LinesToStr([
+    '']));
+end;
+
+procedure TTestModule.TestAnonymousProc_NestedAssignResult;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TProc = reference to procedure;',
+  'function DoIt: TProc;',
+  '  function Sub: TProc;',
+  '  begin',
+  '    Result:=procedure',
+  '      begin',
+  '        Sub:=procedure',
+  '            procedure SubSub;',
+  '            begin',
+  '              Result:=nil;',
+  '              Sub:=nil;',
+  '              DoIt:=nil;',
+  '            end;',
+  '          begin',
+  '            Result:=nil;',
+  '            Sub:=nil;',
+  '            DoIt:=nil;',
+  '          end;',
+  '      end;',
+  '  end;',
+  'begin',
+  'end;',
+  'begin']);
+  ConvertProgram;
+  CheckSource('TestAnonymousProc_NestedAssignResult',
+    LinesToStr([ // statements
+    'this.DoIt = function () {',
+    '  var Result = null;',
+    '  function Sub() {',
+    '    var Result$1 = null;',
+    '    Result$1 = function () {',
+    '      Result$1 = function () {',
+    '        function SubSub() {',
+    '          Result$1 = null;',
+    '          Result$1 = null;',
+    '          Result = null;',
+    '        };',
+    '        Result$1 = null;',
+    '        Result$1 = null;',
+    '        Result = null;',
+    '      };',
+    '    };',
+    '    return Result$1;',
+    '  };',
+    '  return Result;',
+    '};',
+    '']),
+    LinesToStr([
+    '']));
 end;
 
 procedure TTestModule.TestEnum_Name;
@@ -3967,6 +4458,14 @@ begin
   StartProgram(false);
   Add([
   'type TMyEnum = (Red, Green);',
+  'procedure DoIt(var e: TMyEnum; var i: word);',
+  'var',
+  '  v: longint;',
+  '  s: string;',
+  'begin',
+  '  val(s,e,v);',
+  '  val(s,e,i);',
+  'end;',
   'var',
   '  e: TMyEnum;',
   '  i: longint;',
@@ -3996,6 +4495,7 @@ begin
   '  str(red,s);',
   '  s:=str(e:3);',
   '  writestr(s,e:3,red);',
+  '  val(s,e,i);',
   '  e:=TMyEnum(i);',
   '  i:=longint(e);']);
   ConvertProgram;
@@ -4007,6 +4507,14 @@ begin
     '  "1":"Green",',
     '  Green:1',
     '  };',
+    'this.DoIt = function (e, i) {',
+    '  var v = 0;',
+    '  var s = "";',
+    '  e.set(rtl.valEnum(s, $mod.TMyEnum, function (w) {',
+    '    v = w;',
+    '  }));',
+    '  e.set(rtl.valEnum(s, $mod.TMyEnum, i.set));',
+    '};',
     'this.e = 0;',
     'this.i = 0;',
     'this.s = "";',
@@ -4036,6 +4544,9 @@ begin
     '$mod.s = $mod.TMyEnum[$mod.TMyEnum.Red];',
     '$mod.s = rtl.spaceLeft($mod.TMyEnum[$mod.e], 3);',
     '$mod.s = rtl.spaceLeft($mod.TMyEnum[$mod.e], 3)+$mod.TMyEnum[$mod.TMyEnum.Red];',
+    '$mod.e = rtl.valEnum($mod.s, $mod.TMyEnum, function (v) {',
+    '  $mod.i = v;',
+    '});',
     '$mod.e=$mod.i;',
     '$mod.i=$mod.e;',
     '']));
@@ -4225,6 +4736,60 @@ begin
     '']),
     LinesToStr([
     '$mod.e = 1;']));
+end;
+
+procedure TTestModule.TestEnum_InFunction;
+begin
+  StartProgram(false);
+  Add([
+  'const TEnum = 3;',
+  'procedure DoIt;',
+  'type',
+  '  TEnum = (Red, Green, Blue);',
+  '  procedure Sub;',
+  '  type',
+  '    TEnumSub = (Left, Right);',
+  '  var',
+  '    es: TEnumSub;',
+  '  begin',
+  '    es:=Left;',
+  '  end;',
+  'var',
+  '  e, e2: TEnum;',
+  'begin',
+  '  if e in [red,blue] then e2:=e;',
+  'end;',
+  'begin']);
+  ConvertProgram;
+  CheckSource('TestEnum_InFunction',
+    LinesToStr([ // statements
+    'this.TEnum = 3;',
+    'this.TEnum$1 = {',
+    '  "0":"Red",',
+    '  Red:0,',
+    '  "1":"Green",',
+    '  Green:1,',
+    '  "2":"Blue",',
+    '  Blue:2',
+    '  };',
+    'this.TEnumSub = {',
+    '  "0": "Left",',
+    '  Left: 0,',
+    '  "1": "Right",',
+    '  Right: 1',
+    '};',
+    'this.DoIt = function () {',
+    '  function Sub() {',
+    '    var es = 0;',
+    '    es = TEnumSub.Left;',
+    '  };',
+    '  var e = 0;',
+    '  var e2 = 0;',
+    '  if (e in rtl.createSet(TEnum$1.Red, TEnum$1.Blue)) e2 = e;',
+    '};',
+    '']),
+    LinesToStr([
+    '']));
 end;
 
 procedure TTestModule.TestSet_Enum;
@@ -4498,22 +5063,25 @@ end;
 procedure TTestModule.TestSet_AsParams;
 begin
   StartProgram(false);
-  Add('type TEnum = (Red,Blue);');
-  Add('type TEnums = set of TEnum;');
-  Add('procedure DoIt(vG: TEnums; const vH: TEnums; var vI: TEnums);');
-  Add('var vJ: TEnums;');
-  Add('begin');
-  Add('  vg:=vg;');
-  Add('  vj:=vh;');
-  Add('  vi:=vi;');
-  Add('  doit(vg,vg,vg);');
-  Add('  doit(vh,vh,vj);');
-  Add('  doit(vi,vi,vi);');
-  Add('  doit(vj,vj,vj);');
-  Add('end;');
-  Add('var i: TEnums;');
-  Add('begin');
-  Add('  doit(i,i,i);');
+  Add([
+  'type TEnum = (Red,Blue);',
+  'type TEnums = set of TEnum;',
+  'function DoIt(vG: TEnums; const vH: TEnums; var vI: TEnums): TEnums;',
+  'var vJ: TEnums;',
+  'begin',
+  '  Include(vg,red);',
+  '  Include(result,blue);',
+  '  vg:=vg;',
+  '  vj:=vh;',
+  '  vi:=vi;',
+  '  doit(vg,vg,vg);',
+  '  doit(vh,vh,vj);',
+  '  doit(vi,vi,vi);',
+  '  doit(vj,vj,vj);',
+  'end;',
+  'var i: TEnums;',
+  'begin',
+  '  doit(i,i,i);']);
   ConvertProgram;
   CheckSource('TestSet_AsParams',
     LinesToStr([ // statements
@@ -4524,7 +5092,10 @@ begin
     '  Blue: 1',
     '};',
     'this.DoIt = function (vG,vH,vI) {',
+    '  var Result = {};',
     '  var vJ = {};',
+    '  vG = rtl.includeSet(vG, $mod.TEnum.Red);',
+    '  Result = rtl.includeSet(Result, $mod.TEnum.Blue);',
     '  vG = rtl.refSet(vG);',
     '  vJ = rtl.refSet(vH);',
     '  vI.set(rtl.refSet(vI.get()));',
@@ -4553,6 +5124,7 @@ begin
     '      vJ = v;',
     '    }',
     '  });',
+    '  return Result;',
     '};',
     'this.i = {};'
     ]),
@@ -4886,6 +5458,59 @@ begin
     '']));
 end;
 
+procedure TTestModule.TestSet_InFunction;
+begin
+  StartProgram(false);
+  Add([
+  'const',
+  '  TEnum = 3;',
+  '  TSetOfEnum = 4;',
+  '  TSetOfAno = 5;',
+  'procedure DoIt;',
+  'type',
+  '  TEnum = (red, blue);',
+  '  TSetOfEnum = set of TEnum;',
+  '  TSetOfAno = set of (up,down);',
+  'var',
+  '  e: TEnum;',
+  '  se: TSetOfEnum;',
+  '  sa: TSetOfAno;',
+  'begin',
+  '  se:=[e];',
+  '  sa:=[up];',
+  'end;',
+  'begin',
+  '']);
+  ConvertProgram;
+  CheckSource('TestSet_InFunction',
+    LinesToStr([ // statements
+    'this.TEnum = 3;',
+    'this.TSetOfEnum = 4;',
+    'this.TSetOfAno = 5;',
+    'this.TEnum$1 = {',
+    '  "0": "red",',
+    '  red: 0,',
+    '  "1": "blue",',
+    '  blue: 1',
+    '};',
+    'this.TSetOfAno$a = {',
+    '  "0": "up",',
+    '  up: 0,',
+    '  "1": "down",',
+    '  down: 1',
+    '};',
+    'this.DoIt = function () {',
+    '  var e = 0;',
+    '  var se = {};',
+    '  var sa = {};',
+    '  se = rtl.createSet(e);',
+    '  sa = rtl.createSet(TSetOfAno$a.up);',
+    '};',
+    '']),
+    LinesToStr([
+    '']));
+end;
+
 procedure TTestModule.TestSet_ForIn;
 begin
   StartProgram(false);
@@ -4910,7 +5535,7 @@ begin
   '  for er in TSetOfEnumRg do ;',
   '']);
   ConvertProgram;
-  CheckSource('TestEnumName',
+  CheckSource('TestSet_ForIn',
     LinesToStr([ // statements
     'this.TEnum = {',
     '  "0":"Red",',
@@ -4931,7 +5556,10 @@ begin
     'for ($mod.e = 0; $mod.e <= 1; $mod.e++) $mod.e2 = $mod.e;',
     'for ($mod.e = 1; $mod.e <= 2; $mod.e++) $mod.e2 = $mod.e;',
     'for ($mod.e in rtl.createSet($mod.TEnum.Red, $mod.TEnum.Blue)) $mod.e2 = $mod.e;',
-    'for ($mod.e in $mod.s) $mod.e2 = $mod.e;',
+    'for (var $l1 in $mod.s){',
+    '  $mod.e = +$l1;',
+    '  $mod.e2 = $mod.e;',
+    '};',
     'for ($mod.er = 1; $mod.er <= 2; $mod.er++) ;',
     '']));
 end;
@@ -5079,9 +5707,9 @@ begin
     'this.DoIt = function () {',
     '  function Sub() {',
     '    cB$1 = cB$1 + 3;',
-    '    cA = (cA + 3) + 5;',
+    '    cA = cA + 3 + 5;',
     '  };',
-    '  cA = (cA + 2) + 6;',
+    '  cA = cA + 2 + 6;',
     '};'
     ]),
     LinesToStr([
@@ -5164,17 +5792,21 @@ begin
   StartProgram(false);
   Add([
   'const',
-  '  NaN: double; external name ''Global.NaN'';',
+  '  PI: double; external name ''Global.PI'';',
+  '  Tau = 2*pi;',
   'var d: double;',
   'begin',
-  '  d:=NaN;']);
+  '  d:=pi;',
+  '  d:=tau+pi;']);
   ConvertProgram;
   CheckSource('TestConstExternal',
     LinesToStr([
+    'this.Tau = 2*Global.PI;',
     'this.d = 0.0;'
     ]),
     LinesToStr([
-    '$mod.d = Global.NaN;'
+    '$mod.d = Global.PI;',
+    '$mod.d = $mod.Tau + Global.PI;'
     ]));
 end;
 
@@ -5311,7 +5943,9 @@ begin
   '  i: TMyInt;',
   'begin',
   '  i:=-MinInt;',
-  '  i:=default(TMyInt);']);
+  '  i:=default(TMyInt);',
+  '  i:=low(i)+high(i);',
+  '']);
   ConvertProgram;
   CheckSource('TestIntegerRange',
     LinesToStr([
@@ -5323,6 +5957,7 @@ begin
     LinesToStr([
     '$mod.i = - -4503599627370496;',
     '$mod.i = -4503599627370496;',
+    '$mod.i = -4503599627370496 + 4503599627370495;',
     '']));
 end;
 
@@ -5443,8 +6078,13 @@ begin
   '  c:=a;',
   '  d:=c;',
   '  c:=d;',
+  '  c:=currency(c);',
   '  c:=currency(d);',
   '  d:=double(c);',
+  '  c:=i;',
+  '  c:=currency(i);',
+  //'  i:=c;', not allowed
+  '  i:=nativeint(c);',
   '  c:=c+a;',
   '  c:=-c-a;',
   '  c:=d+c;',
@@ -5475,6 +6115,8 @@ begin
   '  j:=c;',
   '  Write(c);',
   '  c:=default(currency);',
+  '  j:=str(c);',
+  '  j:=str(c:0:3);',
   '']);
   ConvertProgram;
   CheckSource('TestCurrency',
@@ -5506,8 +6148,12 @@ begin
     '$mod.c = $mod.a;',
     '$mod.d = $mod.c / 10000;',
     '$mod.c = Math.floor($mod.d * 10000);',
+    '$mod.c = $mod.c;',
     '$mod.c = $mod.d * 10000;',
     '$mod.d = $mod.c / 10000;',
+    '$mod.c = $mod.i * 10000;',
+    '$mod.c = $mod.i * 10000;',
+    '$mod.i = Math.floor($mod.c / 10000);',
     '$mod.c = $mod.c + $mod.a;',
     '$mod.c = -$mod.c - $mod.a;',
     '$mod.c = ($mod.d * 10000) + $mod.c;',
@@ -5538,6 +6184,8 @@ begin
     '$mod.j = $mod.c / 10000;',
     '$mod.Write($mod.c / 10000);',
     '$mod.c = 0;',
+    '$mod.j = rtl.floatToStr($mod.c / 10000);',
+    '$mod.j = rtl.floatToStr($mod.c / 10000, 0, 3);',
     '']));
 end;
 
@@ -5630,38 +6278,47 @@ begin
     'for (var $l8 = 11; $l8 <= 13; $l8++) $mod.i = $l8;',
     'for (var $l9 = 0; $l9 <= 255; $l9++) $mod.i = $l9;',
     'for (var $l10 = 3; $l10 <= 7; $l10++) $mod.i = $l10;',
-    'for ($mod.i in $mod.soi) $mod.i2 = $mod.i;',
-    'for (var $l11 = 3; $l11 <= 7; $l11++) $mod.i = $l11;',
-    'for ($mod.i in $mod.soir) ;',
-    'for (var $l12 = 3; $l12 <= 7; $l12++) $mod.ir = $l12;',
-    'for (var $l13 = 3; $l13 <= 7; $l13++) $mod.ir = $l13;',
-    'for ($mod.ir in $mod.soir) ;',
+    'for (var $l11 in $mod.soi) {',
+    '  $mod.i = +$l11;',
+    '  $mod.i2 = $mod.i;',
+    '};',
+    'for (var $l12 = 3; $l12 <= 7; $l12++) $mod.i = $l12;',
+    'for (var $l13 in $mod.soir) $mod.i = +$l13;',
+    'for (var $l14 = 3; $l14 <= 7; $l14++) $mod.ir = $l14;',
+    'for (var $l15 = 3; $l15 <= 7; $l15++) $mod.ir = $l15;',
+    'for (var $l16 in $mod.soir) $mod.ir = +$l16;',
     '']));
 end;
 
 procedure TTestModule.TestCharConst;
 begin
   StartProgram(false);
-  Add('const');
-  Add('  c: char = ''1'';');
-  Add('begin');
-  Add('  c:=#0;');
-  Add('  c:=#1;');
-  Add('  c:=#9;');
-  Add('  c:=#10;');
-  Add('  c:=#13;');
-  Add('  c:=#31;');
-  Add('  c:=#32;');
-  Add('  c:=#$A;');
-  Add('  c:=#$0A;');
-  Add('  c:=#$b;');
-  Add('  c:=#$0b;');
-  Add('  c:=^A;');
-  Add('  c:=''"'';');
-  Add('  c:=default(char);');
-  Add('  c:=#$00E4;'); // ä
-  Add('  c:=''ä'';');
-  Add('  c:=#$E4;'); // ä
+  Add([
+  'const',
+ '  c: char = ''1'';',
+ 'begin',
+ '  c:=#0;',
+ '  c:=#1;',
+ '  c:=#9;',
+ '  c:=#10;',
+ '  c:=#13;',
+ '  c:=#31;',
+ '  c:=#32;',
+ '  c:=#$A;',
+ '  c:=#$0A;',
+ '  c:=#$b;',
+ '  c:=#$0b;',
+ '  c:=^A;',
+ '  c:=''"'';',
+ '  c:=default(char);',
+ '  c:=#$00E4;', // ä
+ '  c:=''ä'';',
+ '  c:=#$E4;', // ä
+ '  c:=#$D800;', // invalid UTF-16
+ '  c:=#$DFFF;', // invalid UTF-16
+ '  c:=#$FFFF;', // last UCS-2
+ '  c:=high(c);', // last UCS-2
+ '']);
   ConvertProgram;
   CheckSource('TestCharConst',
     LinesToStr([
@@ -5685,6 +6342,10 @@ begin
     '$mod.c = "ä";',
     '$mod.c = "ä";',
     '$mod.c = "ä";',
+    '$mod.c="\uD800";',
+    '$mod.c="\uDFFF";',
+    '$mod.c="\uFFFF";',
+    '$mod.c="\uFFFF";',
     '']));
 end;
 
@@ -5731,18 +6392,25 @@ begin
     '']));
 end;
 
-procedure TTestModule.TestChar_Ord;
+procedure TTestModule.TestChar_BuiltInProcs;
 begin
   StartProgram(false);
-  Add('var');
-  Add('  c: char;');
-  Add('  i: longint;');
-  Add('  s: string;');
-  Add('begin');
-  Add('  i:=ord(c);');
-  Add('  i:=ord(s[i]);');
+  Add([
+  'var',
+  '  c: char;',
+  '  i: longint;',
+  '  s: string;',
+  'begin',
+  '  i:=ord(c);',
+  '  i:=ord(s[i]);',
+  '  c:=chr(i);',
+  '  c:=pred(c);',
+  '  c:=succ(c);',
+  '  c:=low(c);',
+  '  c:=high(c);',
+  '']);
   ConvertProgram;
-  CheckSource('TestChar_Ord',
+  CheckSource('TestChar_BuiltInProcs',
     LinesToStr([
     'this.c = "";',
     'this.i = 0;',
@@ -5751,25 +6419,11 @@ begin
     LinesToStr([
     '$mod.i = $mod.c.charCodeAt();',
     '$mod.i = $mod.s.charCodeAt($mod.i-1);',
-    '']));
-end;
-
-procedure TTestModule.TestChar_Chr;
-begin
-  StartProgram(false);
-  Add('var');
-  Add('  c: char;');
-  Add('  i: longint;');
-  Add('begin');
-  Add('  c:=chr(i);');
-  ConvertProgram;
-  CheckSource('TestChar_Chr',
-    LinesToStr([
-    'this.c = "";',
-    'this.i = 0;'
-    ]),
-    LinesToStr([
     '$mod.c = String.fromCharCode($mod.i);',
+    '$mod.c = String.fromCharCode($mod.c.charCodeAt() - 1);',
+    '$mod.c = String.fromCharCode($mod.c.charCodeAt() + 1);',
+    '$mod.c = "\x00";',
+    '$mod.c = "\uFFFF";',
     '']));
 end;
 
@@ -5791,6 +6445,8 @@ begin
   '  s:=#$20AC;', // euro
   '  s:=#$10437;', // outside BMP
   '  s:=default(string);',
+  '  s:=concat(s);',
+  '  s:=concat(s,''a'',s)',
   '']);
   ConvertProgram;
   CheckSource('TestStringConst',
@@ -5807,8 +6463,10 @@ begin
     '$mod.s=''"\''"'';',
     '$mod.s="€";',
     '$mod.s="'#$F0#$90#$90#$B7'";',
-    '$mod.s="";'
-    ]));
+    '$mod.s="";',
+    '$mod.s = $mod.s;',
+    '$mod.s = $mod.s.concat("a", $mod.s);',
+    '']));
 end;
 
 procedure TTestModule.TestStringConstSurrogate;
@@ -6007,11 +6665,11 @@ begin
     '$mod.s = ""+$mod.b;',
     '$mod.s = ""+$mod.i;',
     '$mod.s = rtl.floatToStr($mod.d);',
-    '$mod.s = (""+$mod.i)+$mod.i;',
+    '$mod.s = ""+$mod.i+$mod.i;',
     '$mod.s = rtl.spaceLeft(""+$mod.i,3);',
     '$mod.s = rtl.floatToStr($mod.d,3,2);',
     '$mod.s = rtl.spaceLeft("" + $mod.i, 4) + $mod.i;',
-    '$mod.s = ("" + $mod.i) + rtl.spaceLeft("" + $mod.i, 5);',
+    '$mod.s = "" + $mod.i + rtl.spaceLeft("" + $mod.i, 5);',
     '$mod.s = rtl.spaceLeft("" + $mod.i, 4) + rtl.spaceLeft("" + $mod.i, 5);',
     '$mod.s = $mod.s + $mod.s;',
     '$mod.s = $mod.s + "foo";',
@@ -6295,6 +6953,25 @@ begin
     LinesToStr([ // this.$main
     ''
     ]));
+end;
+
+procedure TTestModule.TestIfThen;
+begin
+  StartProgram(false);
+  Add([
+  'var b: boolean;',
+  'begin',
+  '  if b then ;',
+  '  if b then else ;']);
+  ConvertProgram;
+  CheckSource('TestIfThen',
+    LinesToStr([ // statements
+    'this.b = false;',
+    '']),
+    LinesToStr([ // this.$main
+    'if ($mod.b) ;',
+    'if ($mod.b) ;',
+    '']));
 end;
 
 procedure TTestModule.TestForLoop;
@@ -6681,6 +7358,44 @@ begin
     '']));
 end;
 
+procedure TTestModule.TestIfThenRaiseElse;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TObject = class',
+  '    constructor Create;',
+  '  end;',
+  'constructor TObject.Create;',
+  'begin',
+  'end;',
+  'var b: boolean;',
+  'begin',
+  '  if b then',
+  '    raise TObject.Create',
+  '  else',
+  '    b:=false;',
+  '']);
+  ConvertProgram;
+  CheckSource('TestIfThenRaiseElse',
+    LinesToStr([ // statements
+    'rtl.createClass($mod, "TObject", null, function () {',
+    '  this.$init = function () {',
+    '  };',
+    '  this.$final = function () {',
+    '  };',
+    '  this.Create = function () {',
+    '  };',
+    '});',
+    'this.b = false;',
+    '']),
+    LinesToStr([ // $mod.$main
+    'if ($mod.b) {',
+    '  throw $mod.TObject.$create("Create")}',
+    ' else $mod.b = false;',
+    '']));
+end;
+
 procedure TTestModule.TestCaseOf;
 begin
   StartProgram(false);
@@ -6835,7 +7550,7 @@ begin
     'var $tmp1 = $mod.s;',
     'if ($tmp1 === "foo") {',
     '  $mod.s = $mod.h}',
-    ' else if (($tmp1.length === 1) && (($tmp1 >= "a") && ($tmp1 <= "z"))) $mod.h = $mod.s;',
+    ' else if (($tmp1.length === 1) && ($tmp1 >= "a") && ($tmp1 <= "z")) $mod.h = $mod.s;',
     '']));
 end;
 
@@ -6865,6 +7580,30 @@ begin
     '  $mod.vI = 3}',
     ' else if ($tmp1 === Bird.e) ;'
     ]));
+end;
+
+procedure TTestModule.TestDebugger;
+begin
+  StartProgram(false);
+  Add([
+  'procedure DoIt;',
+  'begin',
+  '  deBugger;',
+  '  DeBugger();',
+  'end;',
+  'begin',
+  '  Debugger;']);
+  ConvertProgram;
+  CheckSource('TestDebugger',
+    LinesToStr([ // statements
+    'this.DoIt = function () {',
+    '  debugger;',
+    '  debugger;',
+    '};',
+    '']),
+    LinesToStr([ // $mod.$main
+    'debugger;',
+    '']));
 end;
 
 procedure TTestModule.TestArray_Dynamic;
@@ -7118,7 +7857,7 @@ begin
     '']),
     LinesToStr([ // $mod.$main
     '$mod.c = "\x00";',
-    '$mod.c = "'#$EF#$BF#$BF'";',
+    '$mod.c = "\uFFFF";',
     '$mod.Arr[66] = "a";',
     '$mod.Arr[68] = $mod.Arr[$mod.c.charCodeAt()];',
     '$mod.Arr[$mod.c.charCodeAt()] = $mod.Arr[100];',
@@ -7188,6 +7927,50 @@ begin
     '']));
 end;
 
+procedure TTestModule.TestArray_StaticInFunction;
+begin
+  StartProgram(false);
+  Add([
+  'const TArrayInt = 3;',
+  'const TArrayArrayInt = 4;',
+  'procedure DoIt;',
+  'type',
+  '  TArrayInt = array[1..3] of longint;',
+  '  TArrayArrayInt = array[5..6] of TArrayInt;',
+  'var',
+  '  Arr: TArrayInt;',
+  '  Arr2: TArrayArrayInt;',
+  '  Arr3: array[boolean] of TArrayInt = ((11,12,13),(21,22,23));',
+  '  i: longint;',
+  'begin',
+  '  arr2[5]:=arr;',
+  '  arr2:=arr2;',// clone multi dim static array
+  'end;',
+  'begin',
+  '']);
+  ConvertProgram;
+  CheckSource('TestArray_StaticInFunction',
+    LinesToStr([ // statements
+    'this.TArrayInt = 3;',
+    'this.TArrayArrayInt = 4;',
+    'this.TArrayArrayInt$1$clone = function (a) {',
+    '  var r = [];',
+    '  for (var i = 0; i < 2; i++) r.push(a[i].slice(0));',
+    '  return r;',
+    '};',
+    'this.DoIt = function () {',
+    '  var Arr = rtl.arraySetLength(null, 0, 3);',
+    '  var Arr2 = rtl.arraySetLength(null, 0, 2, 3);',
+    '  var Arr3 = [[11, 12, 13], [21, 22, 23]];',
+    '  var i = 0;',
+    '  Arr2[0] = Arr.slice(0);',
+    '  Arr2 = TArrayArrayInt$1$clone(Arr2);',
+    '};',
+    '']),
+    LinesToStr([ // $mod.$main
+    '']));
+end;
+
 procedure TTestModule.TestArrayOfRecord;
 begin
   StartProgram(false);
@@ -7237,6 +8020,44 @@ begin
     '$mod.i = 0;',
     '$mod.i = rtl.length($mod.Arr)-1;',
     '']));
+end;
+
+procedure TTestModule.TestArray_StaticRecord;
+begin
+  StartProgram(false);
+  Add([
+  'type',
+  '  TRec = record',
+  '    Int: longint;',
+  '  end;',
+  '  TArrayRec = array[1..2] of TRec;',
+  'var',
+  '  Arr: TArrayRec;',
+  'begin',
+  '  arr[1].int:=length(arr)+low(arr)+high(arr);',
+  '']);
+  ConvertProgram;
+  CheckSource('TestArray_StaticRecord',
+    LinesToStr([ // statements
+    'this.TRec = function (s) {',
+    '  if (s) {',
+    '    this.Int = s.Int;',
+    '  } else {',
+    '    this.Int = 0;',
+    '  };',
+    '  this.$equal = function (b) {',
+    '    return this.Int === b.Int;',
+    '  };',
+    '};',
+    'this.TArrayRec$clone = function (a) {',
+    '  var r = [];',
+    '  for (var i = 0; i < 2; i++) r.push(new $mod.TRec(a[i]));',
+    '  return r;',
+    '};',
+    'this.Arr = rtl.arraySetLength(null, $mod.TRec, 2);',
+    '']),
+    LinesToStr([ // $mod.$main
+    '$mod.Arr[0].Int = 2 + 1 + 2;']));
 end;
 
 procedure TTestModule.TestArrayOfSet;
@@ -7685,7 +8506,7 @@ begin
     '  var s = "";',
     '  for (var $l1 = 0, $end2 = rtl.length(a) - 1; $l1 <= $end2; $l1++) {',
     '    i = $l1;',
-    '    s = a[(rtl.length(a) - i) - 1];',
+    '    s = a[rtl.length(a) - i - 1];',
     '  };',
     '};',
     'this.s = "";',
@@ -7942,11 +8763,11 @@ begin
   '  TArrStr = array of string;',
   'const',
   '  Ints: TArrInt = (1,2,3);',
-  '  Names: array of string = (''a'',''foo'');',
   '  Aliases: TarrStr = (''foo'',''b'');',
   '  OneInt: TArrInt = (7);',
   '  OneStr: array of integer = (7);',
   '  Chars: array of char = ''aoc'';',
+  '  Names: array of string = (''a'',''foo'');',
   '  NameCount = low(Names)+high(Names)+length(Names);',
   'var i: integer;',
   'begin',
@@ -7965,12 +8786,12 @@ begin
   CheckSource('TestArray_DynArrayConstObjFPC',
     LinesToStr([ // statements
     'this.Ints = [1, 2, 3];',
-    'this.Names = ["a", "foo"];',
     'this.Aliases = ["foo", "b"];',
     'this.OneInt = [7];',
     'this.OneStr = [7];',
     'this.Chars = ["a", "o", "c"];',
-    'this.NameCount = (0 + (rtl.length($mod.Names) - 1)) + rtl.length($mod.Names);',
+    'this.Names = ["a", "foo"];',
+    'this.NameCount = 0 + (rtl.length($mod.Names) - 1) + rtl.length($mod.Names);',
     'this.i = 0;',
     '']),
     LinesToStr([ // $mod.$main
@@ -7999,11 +8820,11 @@ begin
   '  TArrStr = array of string;',
   'const',
   '  Ints: TArrInt = [1,1,2];',
-  '  Names: array of string = [''a'',''a''];',
   '  Aliases: TarrStr = [''foo'',''b''];',
   '  OneInt: TArrInt = [7];',
   '  OneStr: array of integer = [7]+[8];',
   '  Chars: array of char = ''aoc'';',
+  '  Names: array of string = [''a'',''a''];',
   '  NameCount = low(Names)+high(Names)+length(Names);',
   'begin',
   '']);
@@ -8011,12 +8832,12 @@ begin
   CheckSource('TestArray_DynArrayConstDelphi',
     LinesToStr([ // statements
     'this.Ints = [1, 1, 2];',
-    'this.Names = ["a", "a"];',
     'this.Aliases = ["foo", "b"];',
     'this.OneInt = [7];',
     'this.OneStr = rtl.arrayConcatN([7],[8]);',
     'this.Chars = ["a", "o", "c"];',
-    'this.NameCount = (0 + (rtl.length($mod.Names) - 1)) + rtl.length($mod.Names);',
+    'this.Names = ["a", "a"];',
+    'this.NameCount = 0 + (rtl.length($mod.Names) - 1) + rtl.length($mod.Names);',
     '']),
     LinesToStr([ // $mod.$main
     '']));
@@ -8416,7 +9237,7 @@ begin
     ]));
 end;
 
-procedure TTestModule.TestWithRecordDo;
+procedure TTestModule.TestRecord_WithDo;
 begin
   StartProgram(false);
   Add('type');
@@ -8517,9 +9338,9 @@ begin
     '    this.Enums = {};',
     '  };',
     '  this.$equal = function (b) {',
-    '    return (this.Int === b.Int) && ((this.D === b.D) && ((this.Arr === b.Arr)',
-    ' && (rtl.arrayEq(this.Arr2, b.Arr2)',
-    ' && (this.Small.$equal(b.Small) && rtl.eqSet(this.Enums, b.Enums)))));',
+    '    return (this.Int === b.Int) && (this.D === b.D) && (this.Arr === b.Arr)',
+    ' && rtl.arrayEq(this.Arr2, b.Arr2)',
+    ' && this.Small.$equal(b.Small) && rtl.eqSet(this.Enums, b.Enums);',
     '  };',
     '};',
     'this.r = new $mod.TBigRec();',
@@ -8840,7 +9661,7 @@ begin
     '    this.f = {};',
     '  };',
     '  this.$equal = function (b) {',
-    '    return (this.i === b.i) && (rtl.eqCallback(this.Event, b.Event) && rtl.eqSet(this.f, b.f));',
+    '    return (this.i === b.i) && rtl.eqCallback(this.Event, b.Event) && rtl.eqSet(this.f, b.f);',
     '  };',
     '};',
     'this.TNested = function (s) {',
@@ -8942,7 +9763,7 @@ begin
     '    this.o = rtl.arraySetLength(null, 0, 2);',
     '  };',
     '  this.$equal = function (b) {',
-    '    return (this.a === b.a) && (rtl.arrayEq(this.s, b.s) && (rtl.arrayEq(this.m, b.m) && rtl.arrayEq(this.o, b.o)));',
+    '    return (this.a === b.a) && rtl.arrayEq(this.s, b.s) && rtl.arrayEq(this.m, b.m) && rtl.arrayEq(this.o, b.o);',
     '  };',
     '};',
     '']),
@@ -9005,7 +9826,7 @@ begin
     '    this.p = new $mod.TPoint();',
     '  };',
     '  this.$equal = function (b) {',
-    '    return (this.i === b.i) && ((this.a === b.a) && (rtl.arrayEq(this.s, b.s) && (rtl.arrayEq(this.m, b.m) && this.p.$equal(b.p))));',
+    '    return (this.i === b.i) && (this.a === b.a) && rtl.arrayEq(this.s, b.s) && rtl.arrayEq(this.m, b.m) && this.p.$equal(b.p);',
     '  };',
     '};',
     'this.r = new $mod.TRec({',
@@ -9043,6 +9864,48 @@ begin
   SetExpectedPasResolverError('Illegal type conversion: "TPoint" to "record TRec"',
     nIllegalTypeConversionTo);
   ConvertProgram;
+end;
+
+procedure TTestModule.TestRecord_InFunction;
+begin
+  StartProgram(false);
+  Add([
+  'var TPoint: longint = 3;',
+  'procedure DoIt;',
+  'type',
+  '  TPoint = record x,y: longint; end;',
+  '  TPoints = array of TPoint;',
+  'var',
+  '  r: TPoint;',
+  '  p: TPoints;',
+  'begin',
+  '  SetLength(p,2);',
+  'end;',
+  'begin']);
+  ConvertProgram;
+  CheckSource('TestRecord_InFunction',
+    LinesToStr([ // statements
+    'this.TPoint = 3;',
+    'this.TPoint$1 = function (s) {',
+    '  if (s) {',
+    '    this.x = s.x;',
+    '    this.y = s.y;',
+    '  } else {',
+    '    this.x = 0;',
+    '    this.y = 0;',
+    '  };',
+    '  this.$equal = function (b) {',
+    '    return (this.x === b.x) && (this.y === b.y);',
+    '  };',
+    '};',
+    'this.DoIt = function () {',
+    '  var r = new TPoint$1();',
+    '  var p = [];',
+    '  p = rtl.arraySetLength(p, TPoint$1, 2);',
+    '};',
+    '']),
+    LinesToStr([ // $mod.$main
+    '']));
 end;
 
 procedure TTestModule.TestClass_TObjectDefaultConstructor;
@@ -9454,46 +10317,47 @@ begin
     ]));
 end;
 
-procedure TTestModule.TestClass_CallInherited_NoParams;
+procedure TTestModule.TestClass_CallInherited_ProcNoParams;
 begin
   StartProgram(false);
-  Add('type');
-  Add('  TObject = class');
-  Add('    procedure DoAbstract; virtual; abstract;');
-  Add('    procedure DoVirtual; virtual;');
-  Add('    procedure DoIt;');
-  Add('  end;');
-  Add('  TA = class');
-  Add('    procedure doabstract; override;');
-  Add('    procedure dovirtual; override;');
-  Add('    procedure DoSome;');
-  Add('  end;');
-  Add('procedure tobject.dovirtual;');
-  Add('begin');
-  Add('  inherited; // call non existing ancestor -> ignore silently');
-  Add('end;');
-  Add('procedure tobject.doit;');
-  Add('begin');
-  Add('end;');
-  Add('procedure ta.doabstract;');
-  Add('begin');
-  Add('  inherited dovirtual; // call TObject.DoVirtual');
-  Add('end;');
-  Add('procedure ta.dovirtual;');
-  Add('begin');
-  Add('  inherited; // call TObject.DoVirtual');
-  Add('  inherited dovirtual; // call TObject.DoVirtual');
-  Add('  inherited dovirtual(); // call TObject.DoVirtual');
-  Add('  doit;');
-  Add('  doit();');
-  Add('end;');
-  Add('procedure ta.dosome;');
-  Add('begin');
-  Add('  inherited; // call non existing ancestor method -> silently ignore');
-  Add('end;');
-  Add('begin');
+  Add([
+  'type',
+  '  TObject = class',
+  '    procedure DoAbstract; virtual; abstract;',
+  '    procedure DoVirtual; virtual;',
+  '    procedure DoIt;',
+  '  end;',
+  '  TA = class',
+  '    procedure doabstract; override;',
+  '    procedure dovirtual; override;',
+  '    procedure DoSome;',
+  '  end;',
+  'procedure tobject.dovirtual;',
+  'begin',
+  '  inherited; // call non existing ancestor -> ignore silently',
+  'end;',
+  'procedure tobject.doit;',
+  'begin',
+  'end;',
+  'procedure ta.doabstract;',
+  'begin',
+  '  inherited dovirtual; // call TObject.DoVirtual',
+  'end;',
+  'procedure ta.dovirtual;',
+  'begin',
+  '  inherited; // call TObject.DoVirtual',
+  '  inherited dovirtual; // call TObject.DoVirtual',
+  '  inherited dovirtual(); // call TObject.DoVirtual',
+  '  doit;',
+  '  doit();',
+  'end;',
+  'procedure ta.dosome;',
+  'begin',
+  '  inherited; // call non existing ancestor method -> silently ignore',
+  'end;',
+  'begin']);
   ConvertProgram;
-  CheckSource('TestClass_CallInherited_NoParams',
+  CheckSource('TestClass_CallInherited_ProcNoParams',
     LinesToStr([ // statements
     'rtl.createClass($mod,"TObject",null,function(){',
     '  this.$init = function () {',
@@ -9528,42 +10392,52 @@ end;
 procedure TTestModule.TestClass_CallInherited_WithParams;
 begin
   StartProgram(false);
-  Add('type');
-  Add('  TObject = class');
-  Add('    procedure DoAbstract(pA: longint; pB: longint = 0); virtual; abstract;');
-  Add('    procedure DoVirtual(pA: longint; pB: longint = 0); virtual;');
-  Add('    procedure DoIt(pA: longint; pB: longint = 0);');
-  Add('    procedure DoIt2(pA: longint = 1; pB: longint = 2);');
-  Add('  end;');
-  Add('  TClassA = class');
-  Add('    procedure DoAbstract(pA: longint; pB: longint = 0); override;');
-  Add('    procedure DoVirtual(pA: longint; pB: longint = 0); override;');
-  Add('  end;');
-  Add('procedure tobject.dovirtual(pa: longint; pb: longint = 0);');
-  Add('begin');
-  Add('end;');
-  Add('procedure tobject.doit(pa: longint; pb: longint = 0);');
-  Add('begin');
-  Add('end;');
-  Add('procedure tobject.doit2(pa: longint; pb: longint = 0);');
-  Add('begin');
-  Add('end;');
-  Add('procedure tclassa.doabstract(pa: longint; pb: longint = 0);');
-  Add('begin');
-  Add('  inherited dovirtual(pa,pb); // call TObject.DoVirtual(pA,pB)');
-  Add('  inherited dovirtual(pa); // call TObject.DoVirtual(pA,0)');
-  Add('end;');
-  Add('procedure tclassa.dovirtual(pa: longint; pb: longint = 0);');
-  Add('begin');
-  Add('  inherited; // call TObject.DoVirtual(pA,pB)');
-  Add('  inherited dovirtual(pa,pb); // call TObject.DoVirtual(pA,pB)');
-  Add('  inherited dovirtual(pa); // call TObject.DoVirtual(pA,0)');
-  Add('  doit(pa,pb);');
-  Add('  doit(pa);');
-  Add('  doit2(pa);');
-  Add('  doit2;');
-  Add('end;');
-  Add('begin');
+  Add([
+  'type',
+  '  TObject = class',
+  '    procedure DoAbstract(pA: longint; pB: longint = 0); virtual; abstract;',
+  '    procedure DoVirtual(pA: longint; pB: longint = 0); virtual;',
+  '    procedure DoIt(pA: longint; pB: longint = 0);',
+  '    procedure DoIt2(pA: longint = 1; pB: longint = 2);',
+  '    function GetIt(pA: longint = 1; pB: longint = 2): longint;',
+  '  end;',
+  '  TClassA = class',
+  '    procedure DoAbstract(pA: longint; pB: longint = 0); override;',
+  '    procedure DoVirtual(pA: longint; pB: longint = 0); override;',
+  '    function GetIt(pA: longint = 1; pB: longint = 2): longint;',
+  '  end;',
+  'procedure tobject.dovirtual(pa: longint; pb: longint = 0);',
+  'begin',
+  'end;',
+  'procedure tobject.doit(pa: longint; pb: longint = 0);',
+  'begin',
+  'end;',
+  'procedure tobject.doit2(pa: longint; pb: longint = 0);',
+  'begin',
+  'end;',
+  'function tobject.getit(pa: longint; pb: longint = 0): longint;',
+  'begin',
+  'end;',
+  'procedure tclassa.doabstract(pa: longint; pb: longint = 0);',
+  'begin',
+  '  inherited dovirtual(pa,pb); // call TObject.DoVirtual(pA,pB)',
+  '  inherited dovirtual(pa); // call TObject.DoVirtual(pA,0)',
+  'end;',
+  'procedure tclassa.dovirtual(pa: longint; pb: longint = 0);',
+  'begin',
+  '  inherited; // call TObject.DoVirtual(pA,pB)',
+  '  inherited dovirtual(pa,pb); // call TObject.DoVirtual(pA,pB)',
+  '  inherited dovirtual(pa); // call TObject.DoVirtual(pA,0)',
+  '  doit(pa,pb);',
+  '  doit(pa);',
+  '  doit2(pa);',
+  '  doit2;',
+  'end;',
+  'function tclassa.getit(pa: longint; pb: longint = 0): longint;',
+  'begin',
+  '  pa:=inherited;',
+  'end;',
+  'begin']);
   ConvertProgram;
   CheckSource('TestClass_CallInherited_WithParams',
     LinesToStr([ // statements
@@ -9577,6 +10451,10 @@ begin
     '  this.DoIt = function (pA,pB) {',
     '  };',
     '  this.DoIt2 = function (pA,pB) {',
+    '  };',
+    '  this.GetIt = function (pA, pB) {',
+    '    var Result = 0;',
+    '    return Result;',
     '  };',
     '});',
     'rtl.createClass($mod, "TClassA", $mod.TObject, function () {',
@@ -9592,6 +10470,11 @@ begin
     '    this.DoIt(pA,0);',
     '    this.DoIt2(pA,2);',
     '    this.DoIt2(1,2);',
+    '  };',
+    '  this.GetIt$1 = function (pA, pB) {',
+    '    var Result = 0;',
+    '    pA = $mod.TObject.GetIt.apply(this, arguments);',
+    '    return Result;',
     '  };',
     '});'
     ]),
@@ -9696,38 +10579,41 @@ begin
     ]));
 end;
 
-procedure TTestModule.TestClass_ClassVar;
+procedure TTestModule.TestClass_ClassVar_Assign;
 begin
   StartProgram(false);
-  Add('type');
-  Add('  TObject = class');
-  Add('  public');
-  Add('    class var vI: longint;');
-  Add('    class var Sub: TObject;');
-  Add('    constructor Create;');
-  Add('    class function GetIt(Par: longint): tobject;');
-  Add('  end;');
-  Add('constructor tobject.create;');
-  Add('begin');
-  Add('  vi:=vi+1;');
-  Add('  Self.vi:=Self.vi+1;');
-  Add('end;');
-  Add('class function tobject.getit(par: longint): tobject;');
-  Add('begin');
-  Add('  vi:=vi+par;');
-  Add('  Self.vi:=Self.vi+par;');
-  Add('  Result:=self.sub;');
-  Add('end;');
-  Add('var Obj: tobject;');
-  Add('begin');
-  Add('  obj:=tobject.create;');
-  Add('  tobject.vi:=3;');
-  Add('  if tobject.vi=4 then ;');
-  Add('  tobject.sub:=nil;');
-  Add('  obj.sub:=nil;');
-  Add('  obj.sub.sub:=nil;');
+  Add([
+  'type',
+  '  TObject = class',
+  '  public',
+  '    class var vI: longint;',
+  '    class var Sub: TObject;',
+  '    constructor Create;',
+  '    class function GetIt(Par: longint): tobject;',
+  '  end;',
+  'constructor tobject.create;',
+  'begin',
+  '  vi:=vi+1;',
+  '  Self.vi:=Self.vi+1;',
+  '  inc(vi);',
+  'end;',
+  'class function tobject.getit(par: longint): tobject;',
+  'begin',
+  '  vi:=vi+par;',
+  '  Self.vi:=Self.vi+par;',
+  '  inc(vi);',
+  '  Result:=self.sub;',
+  'end;',
+  'var Obj: tobject;',
+  'begin',
+  '  obj:=tobject.create;',
+  '  tobject.vi:=3;',
+  '  if tobject.vi=4 then ;',
+  '  tobject.sub:=nil;',
+  '  obj.sub:=nil;',
+  '  obj.sub.sub:=nil;']);
   ConvertProgram;
-  CheckSource('TestClass_ClassVar',
+  CheckSource('TestClass_ClassVar_Assign',
     LinesToStr([ // statements
     'rtl.createClass($mod,"TObject",null,function(){',
     '  this.vI = 0;',
@@ -9737,13 +10623,15 @@ begin
     '  this.$final = function () {',
     '  };',
     '  this.Create = function(){',
-    '    this.$class.vI = this.vI+1;',
-    '    this.$class.vI = this.vI+1;',
+    '    $mod.TObject.vI = this.vI+1;',
+    '    $mod.TObject.vI = this.vI+1;',
+    '    $mod.TObject.vI += 1;',
     '  };',
     '  this.GetIt = function(Par){',
     '    var Result = null;',
-    '    this.vI = this.vI + Par;',
-    '    this.vI = this.vI + Par;',
+    '    $mod.TObject.vI = this.vI + Par;',
+    '    $mod.TObject.vI = this.vI + Par;',
+    '    $mod.TObject.vI += 1;',
     '    Result = this.Sub;',
     '    return Result;',
     '  };',
@@ -9755,8 +10643,8 @@ begin
     '$mod.TObject.vI = 3;',
     'if ($mod.TObject.vI === 4);',
     '$mod.TObject.Sub=null;',
-    '$mod.Obj.$class.Sub=null;',
-    '$mod.Obj.Sub.$class.Sub=null;',
+    '$mod.TObject.Sub=null;',
+    '$mod.TObject.Sub=null;',
     '']));
 end;
 
@@ -9813,25 +10701,25 @@ begin
     '  this.$final = function () {',
     '  };',
     '  this.Create = function(){',
-    '    this.$class.Sub = this.$class.GetIt(3);',
-    '    this.$class.vI = this.GetMore(4);',
-    '    this.$class.Sub = this.$class.GetIt(5);',
-    '    this.$class.vI = this.GetMore(6);',
+    '    $mod.TObject.Sub = this.$class.GetIt(3);',
+    '    $mod.TObject.vI = this.GetMore(4);',
+    '    $mod.TObject.Sub = this.$class.GetIt(5);',
+    '    $mod.TObject.vI = this.GetMore(6);',
     '  };',
     '  this.GetMore = function(Par){',
     '    var Result = 0;',
-    '    this.$class.Sub = this.$class.GetIt(11);',
-    '    this.$class.vI = this.GetMore(12);',
-    '    this.$class.Sub = this.$class.GetIt(13);',
-    '    this.$class.vI = this.GetMore(14);',
+    '    $mod.TObject.Sub = this.$class.GetIt(11);',
+    '    $mod.TObject.vI = this.GetMore(12);',
+    '    $mod.TObject.Sub = this.$class.GetIt(13);',
+    '    $mod.TObject.vI = this.GetMore(14);',
     '    return Result;',
     '  };',
     '  this.GetIt = function(Par){',
     '    var Result = null;',
-    '    this.Sub = this.GetIt(21);',
-    '    this.vI = this.Sub.GetMore(22);',
-    '    this.Sub = this.GetIt(23);',
-    '    this.vI = this.Sub.GetMore(24);',
+    '    $mod.TObject.Sub = this.GetIt(21);',
+    '    $mod.TObject.vI = this.Sub.GetMore(22);',
+    '    $mod.TObject.Sub = this.GetIt(23);',
+    '    $mod.TObject.vI = this.Sub.GetMore(24);',
     '    return Result;',
     '  };',
     '});',
@@ -9842,7 +10730,7 @@ begin
     '$mod.TObject.GetIt(5);',
     '$mod.Obj.$class.GetIt(6);',
     '$mod.Obj.Sub.$class.GetIt(7);',
-    '$mod.Obj.Sub.$class.GetIt(8).$class.Sub=null;',
+    '$mod.TObject.Sub=null;',
     '$mod.Obj.Sub.$class.GetIt(9).$class.GetIt(10);',
     '$mod.Obj.Sub.$class.GetIt(11).Sub.$class.GetIt(12);',
     '']));
@@ -11502,8 +12390,8 @@ begin
     '    function Sub() {',
     '      Self.Key = Self.Key + 2;',
     '      Self.Key = Self.Key + 3;',
-    '      Self.$class.State = Self.State + 4;',
-    '      Self.$class.State = Self.State + 5;',
+    '      $mod.TObject.State = Self.State + 4;',
+    '      $mod.TObject.State = Self.State + 5;',
     '      $mod.TObject.State = $mod.TObject.State + 6;',
     '      Self.SetSize(Self.GetSize() + 7);',
     '      Self.SetSize(Self.GetSize() + 8);',
@@ -11511,8 +12399,8 @@ begin
     '    Sub();',
     '    Self.Key = Self.Key + 12;',
     '    Self.Key = Self.Key + 13;',
-    '    Self.$class.State = Self.State + 14;',
-    '    Self.$class.State = Self.State + 15;',
+    '    $mod.TObject.State = Self.State + 14;',
+    '    $mod.TObject.State = Self.State + 15;',
     '    $mod.TObject.State = $mod.TObject.State + 16;',
     '    Self.SetSize(Self.GetSize() + 17);',
     '    Self.SetSize(Self.GetSize() + 18);',
@@ -11578,8 +12466,8 @@ begin
     '    function Sub() {',
     '      Self.Key = Self.Key + 2;',
     '      Self.Key = Self.Key + 3;',
-    '      Self.$class.State = Self.State + 4;',
-    '      Self.$class.State = Self.State + 5;',
+    '      $mod.TObject.State = Self.State + 4;',
+    '      $mod.TObject.State = Self.State + 5;',
     '      $mod.TObject.State = $mod.TObject.State + 6;',
     '      Self.SetSize(Self.GetSize() + 7);',
     '      Self.SetSize(Self.GetSize() + 8);',
@@ -11587,8 +12475,8 @@ begin
     '    Sub();',
     '    Self.Key = Self.Key + 12;',
     '    Self.Key = Self.Key + 13;',
-    '    Self.$class.State = Self.State + 14;',
-    '    Self.$class.State = Self.State + 15;',
+    '    $mod.TObject.State = Self.State + 14;',
+    '    $mod.TObject.State = Self.State + 15;',
     '    $mod.TObject.State = $mod.TObject.State + 16;',
     '    Self.SetSize(Self.GetSize() + 17);',
     '    Self.SetSize(Self.GetSize() + 18);',
@@ -11644,16 +12532,16 @@ begin
     '  this.DoIt = function () {',
     '    var Self = this;',
     '    function Sub() {',
-    '      Self.State = Self.State + 2;',
-    '      Self.State = Self.State + 3;',
+    '      $mod.TObject.State = Self.State + 2;',
+    '      $mod.TObject.State = Self.State + 3;',
     '      $mod.TObject.State = $mod.TObject.State + 4;',
     '      Self.SetSize(Self.GetSize() + 5);',
     '      Self.SetSize(Self.GetSize() + 6);',
     '      $mod.TObject.SetSize($mod.TObject.GetSize() + 7);',
     '    };',
     '    Sub();',
-    '    Self.State = Self.State + 12;',
-    '    Self.State = Self.State + 13;',
+    '    $mod.TObject.State = Self.State + 12;',
+    '    $mod.TObject.State = Self.State + 13;',
     '    $mod.TObject.State = $mod.TObject.State + 14;',
     '    Self.SetSize(Self.GetSize() + 15);',
     '    Self.SetSize(Self.GetSize() + 16);',
@@ -11732,9 +12620,15 @@ begin
   '  TObject = class',
   '    Obj: tobject;',
   '    procedure Free;',
+  '    procedure Release;',
   '  end;',
   'procedure tobject.free;',
   'begin',
+  'end;',
+  'procedure tobject.release;',
+  'begin',
+  '  free;',
+  '  if true then free;',
   'end;',
   'function DoIt(o: tobject): tobject;',
   'var l: tobject;',
@@ -11768,6 +12662,10 @@ begin
     '    this.Obj = undefined;',
     '  };',
     '  this.Free = function () {',
+    '  };',
+    '  this.Release = function () {',
+    '    this.Free();',
+    '    if (true) this.Free();',
     '  };',
     '});',
     'this.DoIt = function (o) {',
@@ -12202,7 +13100,7 @@ begin
     'this.C = null;'
     ]),
     LinesToStr([ // $mod.$main
-    '$mod.C.id = $mod.C.id;',
+    '$mod.TObject.id = $mod.C.id;',
     '']));
 end;
 
@@ -12352,7 +13250,7 @@ begin
     '    b = this === null;',
     '    b = this.GlobalId === 3;',
     '    b = 4 === this.GlobalId;',
-    '    this.GlobalId = 5;',
+    '    $mod.TObject.GlobalId = 5;',
     '    this.ProcA();',
     '  };',
     '});'
@@ -13036,30 +13934,68 @@ begin
     '']));
 end;
 
+procedure TTestModule.TestExternalClass_SameNamePublishedProperty;
+begin
+  StartProgram(false);
+  Add([
+  '{$modeswitch externalclass}',
+  'type',
+  '  JSwiper = class external name ''Swiper''',
+  '    constructor New;',
+  '  end;',
+  '  TObject = class',
+  '  private',
+  '    FSwiper: JSwiper;',
+  '  published',
+  '    property Swiper: JSwiper read FSwiper write FSwiper;',
+  '  end;',
+  'begin',
+  '  JSwiper.new;',
+  '']);
+  ConvertProgram;
+  CheckSource('TestExternalClass_SameNamePublishedProperty',
+    LinesToStr([ // statements
+    'rtl.createClass($mod, "TObject", null, function () {',
+    '  this.$init = function () {',
+    '    this.FSwiper = null;',
+    '  };',
+    '  this.$final = function () {',
+    '    this.FSwiper = undefined;',
+    '  };',
+    '  var $r = this.$rtti;',
+    '  $r.addProperty("Swiper", 0, $mod.$rtti["JSwiper"], "FSwiper", "FSwiper");',
+    '});',
+    '']),
+    LinesToStr([ // $mod.$main
+    'new Swiper();',
+    '']));
+end;
+
 procedure TTestModule.TestExternalClass_Property;
 begin
   StartProgram(false);
-  Add('{$modeswitch externalclass}');
-  Add('type');
-  Add('  TExtA = class external name ''ExtA''');
-  Add('    function getYear: longint;');
-  Add('    procedure setYear(Value: longint);');
-  Add('    property Year: longint read getyear write setyear;');
-  Add('  end;');
-  Add('  TExtB = class (TExtA)');
-  Add('    procedure OtherSetYear(Value: longint);');
-  Add('    property year write othersetyear;');
-  Add('  end;');
-  Add('procedure textb.othersetyear(value: longint);');
-  Add('begin');
-  Add('  setYear(Value+4);');
-  Add('end;');
-  Add('var');
-  Add('  A: texta;');
-  Add('  B: textb;');
-  Add('begin');
-  Add('  a.year:=a.year+1;');
-  Add('  b.year:=b.year+2;');
+  Add([
+  '{$modeswitch externalclass}',
+  'type',
+  '  TExtA = class external name ''ExtA''',
+  '    function getYear: longint;',
+  '    procedure setYear(Value: longint);',
+  '    property Year: longint read getyear write setyear;',
+  '  end;',
+  '  TExtB = class (TExtA)',
+  '    procedure OtherSetYear(Value: longint);',
+  '    property year write othersetyear;',
+  '  end;',
+  'procedure textb.othersetyear(value: longint);',
+  'begin',
+  '  setYear(Value+4);',
+  'end;',
+  'var',
+  '  A: texta;',
+  '  B: textb;',
+  'begin',
+  '  a.year:=a.year+1;',
+  '  b.year:=b.year+2;']);
   ConvertProgram;
   CheckSource('TestExternalClass_NonExternalOverride',
     LinesToStr([ // statements
@@ -13078,6 +14014,62 @@ begin
     LinesToStr([ // $mod.$main
     '$mod.A.setYear($mod.A.getYear()+1);',
     '$mod.B.OtherSetYear($mod.B.getYear()+2);',
+    '']));
+end;
+
+procedure TTestModule.TestExternalClass_PropertyDate;
+begin
+  StartProgram(false);
+  Add([
+  '{$modeswitch externalclass}',
+  'type',
+  '  TExtA = class external name ''ExtA''',
+  '  end;',
+  '  TExtB = class (TExtA)',
+  '    FDate: string;',
+  '    property Date: string read FDate write FDate;',
+  '    property ExtA: string read FDate write FDate;',
+  '  end;',
+  '  {$M+}',
+  '  TObject = class',
+  '    FDate: string;',
+  '  published',
+  '    property Date: string read FDate write FDate;',
+  '    property ExtA: string read FDate write FDate;',
+  '  end;',
+  'var',
+  '  B: textb;',
+  '  o: TObject;',
+  'begin',
+  '  b.date:=b.exta;',
+  '  o.date:=o.exta;']);
+  ConvertProgram;
+  CheckSource('TestExternalClass_PropertyDate',
+    LinesToStr([ // statements
+    'rtl.createClassExt($mod, "TExtB", ExtA, "", function () {',
+    '  this.$init = function () {',
+    '    this.FDate = "";',
+    '  };',
+    '  this.$final = function () {',
+    '  };',
+    '});',
+    'rtl.createClass($mod, "TObject", null, function () {',
+    '  this.$init = function () {',
+    '    this.FDate = "";',
+    '  };',
+    '  this.$final = function () {',
+    '  };',
+    '  var $r = this.$rtti;',
+    '  $r.addField("FDate", rtl.string);',
+    '  $r.addProperty("Date", 0, rtl.string, "FDate", "FDate");',
+    '  $r.addProperty("ExtA", 0, rtl.string, "FDate", "FDate");',
+    '});',
+    'this.B = null;',
+    'this.o = null;',
+    '']),
+    LinesToStr([ // $mod.$main
+    '$mod.B.FDate = $mod.B.FDate;',
+    '$mod.o.FDate = $mod.o.FDate;',
     '']));
 end;
 
@@ -14487,7 +15479,6 @@ begin
     '  };',
     '});',
     'rtl.createClass($mod, "TBird", $mod.TObject, function () {',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IBird);',
     '});',
     'this.BirdIntf = null;',
@@ -14566,7 +15557,6 @@ begin
     '  };',
     '  this.DoIt$3 = function (b) {',
     '  };',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IBird, {',
     '    DoIt$2: "DoIt$3",',
     '    DoIt: "DoIt$2"',
@@ -14656,13 +15646,11 @@ begin
     '  };',
     '  this.DoIt = function (i) {',
     '  };',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IUnknown);',
     '});',
     'rtl.createClass($mod, "TBird", $mod.TObject, function () {',
     '  this.Fly = function (i) {',
     '  };',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IBird);',
     '  rtl.addIntf(this, $mod.IUnknown);',
     '});',
@@ -14706,7 +15694,6 @@ begin
     'rtl.createClass($mod, "TBird", $mod.TObject, function () {',
     '  this.DoIt$1 = function (i) {',
     '  };',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IBird, {',
     '    DoIt: "DoIt$1"',
     '  });',
@@ -14766,7 +15753,6 @@ begin
     '  };',
     '  this.Hop$1 = function (b) {',
     '  };',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IBird, {',
     '    Walk$1: "Hop$1",',
     '    Fly: "Move",',
@@ -14813,15 +15799,71 @@ begin
     '  };',
     '  this.$final = function () {',
     '  };',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IBird);',
     '  rtl.addIntf(this, $mod.IDog);',
     '});',
     'rtl.createClass($mod, "TBird", $mod.TObject, function () {',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IUnknown);',
     '  rtl.addIntf(this, $mod.IBird);',
     '  rtl.addIntf(this, $mod.IDog);',
+    '});',
+    '']),
+    LinesToStr([ // $mod.$main
+    '']));
+end;
+
+procedure TTestModule.TestClassInterface_MethodOverride;
+begin
+  StartProgram(false);
+  Add([
+  '{$interfaces corba}',
+  'type',
+  '  IUnknown = interface',
+  '    [''{D6D98E5B-8A10-4FEC-856A-7BFC847FE74B}'']',
+  '    procedure Go;',
+  '  end;',
+  '  TObject = class(IUnknown)',
+  '    procedure Go; virtual; abstract;',
+  '  end;',
+  '  TBird = class',
+  '    procedure Go; override;',
+  '  end;',
+  '  TCat = class(TObject)',
+  '    procedure Go; override;',
+  '  end;',
+  '  TDog = class(TObject, IUnknown)',
+  '    procedure Go; override;',
+  '  end;',
+  'procedure TBird.Go; begin end;',
+  'procedure TCat.Go; begin end;',
+  'procedure TDog.Go; begin end;',
+  'begin',
+  '']);
+  ConvertProgram;
+  CheckSource('TestClassInterface_MethodOverride',
+    LinesToStr([ // statements
+    'rtl.createInterface($mod, "IUnknown", "{D6D98E5B-8A10-4FEC-856A-7BFC847FE74B}", ["Go"], null);',
+    'rtl.createClass($mod, "TObject", null, function () {',
+    '  this.$init = function () {',
+    '  };',
+    '  this.$final = function () {',
+    '  };',
+    '  rtl.addIntf(this, $mod.IUnknown);',
+    '});',
+    'rtl.createClass($mod, "TBird", $mod.TObject, function () {',
+    '  this.Go = function () {',
+    '  };',
+    '  rtl.addIntf(this, $mod.IUnknown);',
+    '});',
+    'rtl.createClass($mod, "TCat", $mod.TObject, function () {',
+    '  this.Go = function () {',
+    '  };',
+    '  rtl.addIntf(this, $mod.IUnknown);',
+    '});',
+    'rtl.createClass($mod, "TDog", $mod.TObject, function () {',
+    '  this.Go = function () {',
+    '  };',
+    '  rtl.addIntf(this, $mod.IUnknown);',
     '});',
     '']),
     LinesToStr([ // $mod.$main
@@ -14877,7 +15919,6 @@ begin
     '  };',
     '});',
     'rtl.createClass($mod, "TBird", $mod.TObject, function () {',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IBird);',
     '  rtl.addIntf(this, $mod.IEagle);',
     '  rtl.addIntf(this, $mod.IDove);',
@@ -14965,7 +16006,6 @@ begin
     '  };',
     '});',
     'rtl.createClass($mod, "TBird", $mod.TObject, function () {',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IBird);',
     '  rtl.addIntf(this, $mod.IEagle);',
     '  rtl.addIntf(this, $mod.IDove);',
@@ -15053,7 +16093,6 @@ begin
     '  };',
     '});',
     'rtl.createClass($mod, "TBird", $mod.TObject, function () {',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IBird);',
     '});',
     'this.IntfVar = null;',
@@ -15129,7 +16168,6 @@ begin
     '  };',
     '});',
     'rtl.createClass($mod, "TBird", $mod.TObject, function () {',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IBird);',
     '});',
     'this.DoIt = function (u, i, j) {',
@@ -15282,7 +16320,6 @@ begin
     '  };',
     '  this.$final = function () {',
     '  };',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IUnknown);',
     '});',
     'this.i = null;',
@@ -15341,7 +16378,6 @@ begin
     '  };',
     '  this.$final = function () {',
     '  };',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IUnknown);',
     '});',
     'this.DoDefault = function (i, j) {',
@@ -15388,7 +16424,6 @@ begin
     '  };',
     '  this.$final = function () {',
     '  };',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IUnknown);',
     '});',
     'this.DoDefault = function (i) {',
@@ -15456,7 +16491,6 @@ begin
     '    var Result = null;',
     '    return Result;',
     '  };',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IUnknown);',
     '});',
     'rtl.createClass($mod, "TMouse", $mod.TObject, function () {',
@@ -15481,6 +16515,7 @@ begin
     '    };',
     '    return Result;',
     '  };',
+    '  rtl.addIntf(this, $mod.IUnknown);',
     '});',
     '']),
     LinesToStr([ // $mod.$main
@@ -15524,7 +16559,6 @@ begin
     '  };',
     '  this.$final = function () {',
     '  };',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IUnknown);',
     '});',
     'this.DoDefault = function (i, j, o) {',
@@ -15586,7 +16620,6 @@ begin
     '  };',
     '  this.$final = function () {',
     '  };',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IUnknown);',
     '});',
     'this.DoIt = function (v, j, k, l) {',
@@ -15698,7 +16731,6 @@ begin
     '  };',
     '  this.$final = function () {',
     '  };',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IUnknown);',
     '});',
     'this.DoIt = function (i) {',
@@ -15798,7 +16830,6 @@ begin
     '  };',
     '  this.$final = function () {',
     '  };',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IUnknown);',
     '});',
     'this.GetIt = function () {',
@@ -15888,7 +16919,6 @@ begin
     '  this.$final = function () {',
     '    this.FAnt = undefined;',
     '  };',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IUnknown);',
     '});',
     'this.DoIt = function () {',
@@ -15975,7 +17005,6 @@ begin
     '  };',
     '  this.$final = function () {',
     '  };',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IUnknown);',
     '});',
     'this.DoIt = function () {',
@@ -16054,7 +17083,6 @@ begin
     '  };',
     '});',
     'rtl.createClass($mod, "TBird", $mod.TObject, function () {',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IBird);',
     '  rtl.addIntf(this, $mod.IEagle);',
     '  rtl.addIntf(this, $mod.IDove);',
@@ -16129,7 +17157,6 @@ begin
     '  };',
     '  this.$final = function () {',
     '  };',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $mod.IUnknown);',
     '});',
     'this.DoIt = function () {',
@@ -16290,7 +17317,6 @@ begin
     '    var Result = 0;',
     '    return Result;',
     '  };',
-    '  this.$intfmaps = {};',
     '  rtl.addIntf(this, $impl.IUnknown);',
     '});',
     '$impl.i = null;',
@@ -16373,7 +17399,7 @@ begin
     '    this.D4 = 0;',
     '  };',
     '  this.$equal = function (b) {',
-    '    return (this.D1 === b.D1) && ((this.D2 === b.D2) && ((this.D3 === b.D3) && (this.D4 === b.D4)));',
+    '    return (this.D1 === b.D1) && (this.D2 === b.D2) && (this.D3 === b.D3) && (this.D4 === b.D4);',
     '  };',
     '};',
     'this.DoConstGUIDIt = function (g) {',
@@ -16488,7 +17514,7 @@ begin
     '    this.D4 = 0;',
     '  };',
     '  this.$equal = function (b) {',
-    '    return (this.D1 === b.D1) && ((this.D2 === b.D2) && ((this.D3 === b.D3) && (this.D4 === b.D4)));',
+    '    return (this.D1 === b.D1) && (this.D2 === b.D2) && (this.D3 === b.D3) && (this.D4 === b.D4);',
     '  };',
     '};',
     'rtl.createClass($mod, "TObject", null, function () {',
@@ -17860,6 +18886,7 @@ begin
   '  C: tclass;',
   '  a: tarrint;',
   '  p: Pointer = nil;',
+  '  s: string;',
   'begin',
   '  p:=p;',
   '  p:=nil;',
@@ -17876,6 +18903,8 @@ begin
   '  a:=TArrInt(p);',
   '  p:=n;',
   '  p:=Pointer(a);',
+  '  p:=pointer(s);',
+  '  s:=string(p);',
   '']);
   ConvertProgram;
   CheckSource('TestPointer',
@@ -17892,6 +18921,7 @@ begin
     'this.C = null;',
     'this.a = [];',
     'this.p = null;',
+    'this.s = "";',
     '']),
     LinesToStr([ // $mod.$main
     '$mod.p = $mod.p;',
@@ -17909,6 +18939,8 @@ begin
     '$mod.a = $mod.p;',
     '$mod.p = null;',
     '$mod.p = $mod.a;',
+    '$mod.p = $mod.s;',
+    '$mod.s = $mod.p;',
     '']));
 end;
 
@@ -18111,6 +19143,7 @@ begin
   '  r: TRec;',
   '  p: PRec;',
   '  q: ^TRec;',
+  '  Ptr: pointer;',
   'begin',
   '  new(p);',
   '  p:=@r;',
@@ -18122,6 +19155,8 @@ begin
   '  dispose(p);',
   '  new(q);',
   '  dispose(q);',
+  '  Ptr:=p;',
+  '  p:=PRec(ptr);',
   '']);
   ConvertProgram;
   CheckSource('TestPointer_Record',
@@ -18139,6 +19174,7 @@ begin
     'this.r = new $mod.TRec();',
     'this.p = null;',
     'this.q = null;',
+    'this.Ptr = null;',
     '']),
     LinesToStr([ // $mod.$main
     '$mod.p = new $mod.TRec();',
@@ -18151,6 +19187,8 @@ begin
     '$mod.p = null;',
     '$mod.q = new $mod.TRec();',
     '$mod.q = null;',
+    '$mod.Ptr = $mod.p;',
+    '$mod.p = $mod.Ptr;',
     '']));
 end;
 
@@ -19181,15 +20219,15 @@ begin
     LinesToStr([ // $mod.$main
     '$mod.DoIt($mod.d);',
     '$mod.DoIt($mod.dt);',
-    '$mod.DoIt($mod.i);',
-    '$mod.DoIt($mod.b);',
-    '$mod.DoIt($mod.shi);',
-    '$mod.DoIt($mod.w);',
-    '$mod.DoIt($mod.smi);',
-    '$mod.DoIt($mod.lw);',
-    '$mod.DoIt($mod.li);',
-    '$mod.DoIt($mod.ni);',
-    '$mod.DoIt($mod.nu);',
+    '$mod.DoIt$1($mod.i);',
+    '$mod.DoIt$1($mod.b);',
+    '$mod.DoIt$1($mod.shi);',
+    '$mod.DoIt$1($mod.w);',
+    '$mod.DoIt$1($mod.smi);',
+    '$mod.DoIt$1($mod.lw);',
+    '$mod.DoIt$1($mod.li);',
+    '$mod.DoIt$1($mod.ni);',
+    '$mod.DoIt$1($mod.nu);',
     '']));
 end;
 
@@ -20185,6 +21223,35 @@ begin
     '']));
 end;
 
+procedure TTestModule.TestRTTI_Class_OmitRTTI;
+begin
+  Converter.Options:=Converter.Options-[coNoTypeInfo];
+  StartProgram(false);
+  Add([
+  '{$modeswitch omitrtti}',
+  'type',
+  '  TObject = class',
+  '  private',
+  '    FA: byte;',
+  '  published',
+  '    property A: byte read FA write FA;',
+  '  end;',
+  'begin']);
+  ConvertProgram;
+  CheckSource('TestRTTI_Class_OmitRTTI',
+    LinesToStr([ // statements
+    'rtl.createClass($mod, "TObject", null, function () {',
+    '  this.$init = function () {',
+    '    this.FA = 0;',
+    '  };',
+    '  this.$final = function () {',
+    '  };',
+    '});',
+    '']),
+    LinesToStr([ // $mod.$main
+    '']));
+end;
+
 procedure TTestModule.TestRTTI_IndexModifier;
 begin
   Converter.Options:=Converter.Options-[coNoTypeInfo];
@@ -20902,6 +21969,9 @@ begin
   ConvertProgram;
   CheckSource('TestRTTI_Record',
     LinesToStr([ // statements
+    '$mod.$rtti.$DynArray("TFloatRec.d$a", {',
+    '  eltype: rtl.char',
+    '});',
     'this.TFloatRec = function (s) {',
     '  if (s) {',
     '    this.d = s.d;',
@@ -20912,9 +21982,6 @@ begin
     '    return this.d === b.d;',
     '  };',
     '};',
-    '$mod.$rtti.$DynArray("TFloatRec.d$a", {',
-    '  eltype: rtl.char',
-    '});',
     '$mod.$rtti.$Record("TFloatRec", {}).addFields("d", $mod.$rtti["TFloatRec.d$a"]);',
     'this.p = null;',
     'this.r = new $mod.TFloatRec();',
@@ -20930,31 +21997,32 @@ procedure TTestModule.TestRTTI_LocalTypes;
 begin
   Converter.Options:=Converter.Options-[coNoTypeInfo];
   StartProgram(false);
-  Add('procedure DoIt;');
-  Add('type');
-  Add('  integer = longint;');
-  Add('  TPoint = record');
-  Add('    x,y: integer;');
-  Add('  end;');
-  Add('begin');
-  Add('end;');
-  Add('begin');
+  Add([
+  'procedure DoIt;',
+  'type',
+  '  integer = longint;',
+  '  TPoint = record',
+  '    x,y: integer;',
+  '  end;',
+  'begin',
+  'end;',
+  'begin']);
   ConvertProgram;
   CheckSource('TestRTTI_LocalTypes',
     LinesToStr([ // statements
-    'this.DoIt = function () {',
-    '  this.TPoint = function (s) {',
-    '    if (s) {',
-    '      this.x = s.x;',
-    '      this.y = s.y;',
-    '    } else {',
-    '      this.x = 0;',
-    '      this.y = 0;',
-    '    };',
-    '    this.$equal = function (b) {',
-    '      return (this.x === b.x) && (this.y === b.y);',
-    '    };',
+    'this.TPoint = function(s) {',
+    '  if (s) {',
+    '    this.x = s.x;',
+    '    this.y = s.y;',
+    '  } else {',
+    '    this.x = 0;',
+    '    this.y = 0;',
     '  };',
+    '  this.$equal = function (b) {',
+    '    return (this.x === b.x) && (this.y === b.y);',
+    '  };',
+    '};',
+    'this.DoIt = function () {',
     '};',
     '']),
     LinesToStr([ // $mod.$main
@@ -21788,7 +22856,7 @@ begin
     'this.DoIt = function () {',
     '  var b = false;',
     '  var s = "";',
-    '  if (b) throw "assert failed";',
+    '  if (!b) throw "assert failed";',
     '};',
     '']),
     LinesToStr([ // $mod.$main
@@ -21836,8 +22904,8 @@ begin
     'this.DoIt = function () {',
     '  var b = false;',
     '  var s = "";',
-    '  if (b) throw pas.SysUtils.EAssertionFailed.$create("Create");',
-    '  if (b) throw pas.SysUtils.EAssertionFailed.$create("Create$1", ["msg"]);',
+    '  if (!b) throw pas.SysUtils.EAssertionFailed.$create("Create");',
+    '  if (!b) throw pas.SysUtils.EAssertionFailed.$create("Create$1", ["msg"]);',
     '};',
     '']),
     LinesToStr([ // $mod.$main
@@ -22099,7 +23167,8 @@ begin
   StartProgram(false);
   Add([
   '{$R+}',
-  'type TLetter = char;',
+  'type',
+  '  TLetter = char;',
   'var',
   '  b: TLetter = ''2'';',
   '  w: TLetter = ''3'';',
@@ -22194,6 +23263,9 @@ begin
   '  TArrByte = array[byte] of Ten;',
   '  TArrChar = array[''0''..''9''] of Ten;',
   '  TArrByteChar = array[byte,''0''..''9''] of Ten;',
+  '  TObject = class',
+  '    A: TArr;',
+  '  end;',
   'procedure DoIt;',
   'var',
   '  Arr: TArr;',
@@ -22203,6 +23275,7 @@ begin
   '  ArrByteChar: TArrByteChar;',
   '  i: Ten;',
   '  c: char;',
+  '  o: tobject;',
   'begin',
   '  i:=Arr[1];',
   '  i:=ArrByteChar[1,''2''];',
@@ -22214,12 +23287,21 @@ begin
   '  ArrChar[c]:=ArrChar[c];',
   '  ArrByteChar[7,''7'']:=ArrByteChar[7,''7''];',
   '  ArrByteChar[i,c]:=ArrByteChar[i,c];',
+  '  o.a[i]:=o.a[i];',
   'end;',
   'begin',
   '']);
   ConvertProgram;
   CheckSource('TestRangeChecks_ArrayIndex',
     LinesToStr([ // statements
+    'rtl.createClass($mod, "TObject", null, function () {',
+    '  this.$init = function () {',
+    '    this.A = [];',
+    '  };',
+    '  this.$final = function () {',
+    '    this.A = undefined;',
+    '  };',
+    '});',
     'this.DoIt = function () {',
     '  var Arr = [];',
     '  var ArrArr = [];',
@@ -22228,6 +23310,7 @@ begin
     '  var ArrByteChar = rtl.arraySetLength(null, 0, 256, 10);',
     '  var i = 0;',
     '  var c = "";',
+    '  var o = null;',
     '  i = rtl.rc(Arr[1], 1, 10);',
     '  i = rtl.rc(ArrByteChar[1][2], 1, 10);',
     '  Arr[1] = rtl.rc(Arr[1], 1, 10);',
@@ -22238,6 +23321,7 @@ begin
     '  rtl.rcArrW(ArrChar, c.charCodeAt() - 48, rtl.rcArrR(ArrChar, c.charCodeAt() - 48));',
     '  ArrByteChar[7][7] = rtl.rc(ArrByteChar[7][7], 1, 10);',
     '  rtl.rcArrW(ArrByteChar, i, c.charCodeAt() - 48, rtl.rcArrR(ArrByteChar, i, c.charCodeAt() - 48));',
+    '  o.A[i] = rtl.rc(o.A[i], 1, 10);',
     '};',
     '']),
     LinesToStr([ // $mod.$main
@@ -22248,29 +23332,44 @@ procedure TTestModule.TestRangeChecks_StringIndex;
 begin
   StartProgram(false);
   Add([
+  'type',
+  '  TObject = class',
+  '    S: string;',
+  '  end;',
   '{$R+}',
   'procedure DoIt(var h: string);',
   'var',
   '  s: string;',
   '  i: longint;',
   '  c: char;',
+  '  o: tobject;',
   'begin',
   '  c:=s[1];',
   '  s[i]:=s[i];',
   '  h[i]:=h[i];',
+  '  c:=o.s[i];',
   'end;',
   'begin',
   '']);
   ConvertProgram;
   CheckSource('TestRangeChecks_StringIndex',
     LinesToStr([ // statements
+    'rtl.createClass($mod, "TObject", null, function () {',
+    '  this.$init = function () {',
+    '    this.S = "";',
+    '  };',
+    '  this.$final = function () {',
+    '  };',
+    '});',
     'this.DoIt = function (h) {',
     '  var s = "";',
     '  var i = 0;',
     '  var c = "";',
+    '  var o = null;',
     '  c = rtl.rcc(rtl.rcCharAt(s, 0), 0, 65535);',
     '  s = rtl.rcSetCharAt(s, i - 1, rtl.rcCharAt(s, i - 1));',
     '  h.set(rtl.rcSetCharAt(h.get(), i - 1, rtl.rcCharAt(h.get(), i - 1)));',
+    '  c = rtl.rcc(o.S.charAt(i - 1), 0, 65535);',
     '};',
     '']),
     LinesToStr([ // $mod.$main

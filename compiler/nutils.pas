@@ -54,6 +54,14 @@ interface
                             then the parent node is processed again }
                           pm_postandagain);
 
+
+    tmhs_flag = (
+      { exceptions (overflow, sigfault etc.) are considered as side effect }
+      mhs_exceptions
+    );
+    tmhs_flags = set of tmhs_flag;
+    pmhs_flags = ^tmhs_flags;
+
     foreachnodefunction = function(var n: tnode; arg: pointer): foreachnoderesult of object;
     staticforeachnodefunction = function(var n: tnode; arg: pointer): foreachnoderesult;
 
@@ -117,7 +125,7 @@ interface
     function genloadfield(n: tnode; const fieldname: string): tnode;
 
     { returns true, if the tree given might have side effects }
-    function might_have_sideeffects(n : tnode) : boolean;
+    function might_have_sideeffects(n : tnode;const flags : tmhs_flags = []) : boolean;
 
     { count the number of nodes in the node tree,
       rough estimation how large the tree "node" is }
@@ -153,6 +161,10 @@ interface
     { include or exclude cs from p.localswitches }
     procedure node_change_local_switch(p : tnode;cs : tlocalswitch;enable : boolean);
 
+    { returns true, if p is a node which shall be short boolean evaluated,
+      if it is not an orn/andn with boolean operans, the result is undefined }
+    function doshortbooleval(p : tnode) : Boolean;
+
 implementation
 
     uses
@@ -184,7 +196,7 @@ implementation
               result := foreachnode(procmethod,tcallnode(n).funcretnode,f,arg) or result;
               result := foreachnode(procmethod,tnode(tcallnode(n).callcleanupblock),f,arg) or result;
             end;
-          ifn, whilerepeatn, forn, tryexceptn, tryfinallyn:
+          ifn, whilerepeatn, forn, tryexceptn:
             begin
               { not in one statement, won't work because of b- }
               result := foreachnode(procmethod,tloopnode(n).t1,f,arg) or result;
@@ -281,7 +293,7 @@ implementation
               result := foreachnodestatic(procmethod,tcallnode(n).funcretnode,f,arg) or result;
               result := foreachnodestatic(procmethod,tnode(tcallnode(n).callcleanupblock),f,arg) or result;
             end;
-          ifn, whilerepeatn, forn, tryexceptn, tryfinallyn:
+          ifn, whilerepeatn, forn, tryexceptn:
             begin
               { not in one statement, won't work because of b- }
               result := foreachnodestatic(procmethod,tloopnode(n).t1,f,arg) or result;
@@ -570,21 +582,32 @@ implementation
         obj_def: tobjectdef;
         self_temp,
         vmt_temp: ttempcreatenode;
-        check_self: tnode;
+        check_self,n: tnode;
         stat: tstatementnode;
         block: tblocknode;
         paras: tcallparanode;
-        docheck: boolean;
+        docheck,is_typecasted_classref: boolean;
       begin
         self_resultdef:=self_node.resultdef;
         case self_resultdef.typ of
           classrefdef:
-            obj_def:=tobjectdef(tclassrefdef(self_resultdef).pointeddef);
+            begin
+              obj_def:=tobjectdef(tclassrefdef(self_resultdef).pointeddef);
+            end;
           objectdef:
             obj_def:=tobjectdef(self_resultdef);
           else
             internalerror(2015052701);
         end;
+        n:=self_node;
+        is_typecasted_classref:=false;
+	if (n.nodetype=typeconvn) then
+          begin
+            while assigned(n) and (n.nodetype=typeconvn) and (nf_explicit in ttypeconvnode(n).flags) do
+              n:=ttypeconvnode(n).left;
+            if assigned(n) and (n.resultdef.typ=classrefdef) then
+              is_typecasted_classref:=true;
+	  end;
         if is_classhelper(obj_def) then
           obj_def:=tobjectdef(tobjectdef(obj_def).extendeddef);
         docheck:=
@@ -627,14 +650,14 @@ implementation
             addstatement(stat,ctempdeletenode.create_normal_temp(self_temp));
             self_node:=ctemprefnode.create(self_temp);
           end;
-        { get the VMT field in case of a class/object }
-        if (self_resultdef.typ=objectdef) and
-           assigned(tobjectdef(self_resultdef).vmt_field) then
-          result:=csubscriptnode.create(tobjectdef(self_resultdef).vmt_field,self_node)
         { in case of a classref, the "instance" is a pointer
           to pointer to a VMT and there is no vmt field }
-        else if self_resultdef.typ=classrefdef then
+        if is_typecasted_classref or (self_resultdef.typ=classrefdef) then
           result:=self_node
+        { get the VMT field in case of a class/object }
+        else if (self_resultdef.typ=objectdef) and
+           assigned(tobjectdef(self_resultdef).vmt_field) then
+          result:=csubscriptnode.create(tobjectdef(self_resultdef).vmt_field,self_node)
         { in case of an interface, the "instance" is a pointer to a pointer
           to a VMT -> dereference once already }
         else
@@ -868,6 +891,7 @@ implementation
                     in_abs_real,
                     in_aligned_x,
                     in_unaligned_x,
+                    in_volatile_x,
                     in_prefetch_var:
                       begin
                         inc(result);
@@ -950,6 +974,11 @@ implementation
                       end;
                   end;
 
+                end;
+              finalizetempsn:
+                begin
+                  result:=NODE_COMPLEXITY_INF;
+                  exit;
                 end;
               else
                 begin
@@ -1325,7 +1354,7 @@ implementation
     function check_for_sideeffect(var n: tnode; arg: pointer): foreachnoderesult;
       begin
         result:=fen_false;
-        if (n.nodetype in [assignn,calln,asmn]) or
+        if (n.nodetype in [assignn,calln,asmn,finalizetempsn]) or
           ((n.nodetype=inlinen) and
            (tinlinenode(n).inlinenumber in [in_write_x,in_writeln_x,in_read_x,in_readln_x,in_str_x_string,
              in_val_x,in_reset_x,in_rewrite_x,in_reset_typedfile,in_rewrite_typedfile,
@@ -1334,13 +1363,19 @@ implementation
              in_finalize_x,in_new_x,in_dispose_x,in_exit,in_copy_x,in_initialize_x,in_leave,in_cycle,
              in_and_assign_x_y,in_or_assign_x_y,in_xor_assign_x_y,in_sar_assign_x_y,in_shl_assign_x_y,
              in_shr_assign_x_y,in_rol_assign_x_y,in_ror_assign_x_y,in_neg_assign_x,in_not_assign_x])
+          ) or
+          ((mhs_exceptions in pmhs_flags(arg)^) and
+           ((n.nodetype in [derefn,vecn,subscriptn]) or
+            ((n.nodetype in [addn,subn,muln,divn,slashn,unaryminusn]) and (n.localswitches*[cs_check_overflow,cs_check_range]<>[]))
+           )
           ) then
           result:=fen_norecurse_true;
       end;
 
-    function might_have_sideeffects(n : tnode) : boolean;
+
+    function might_have_sideeffects(n : tnode; const flags : tmhs_flags) : boolean;
       begin
-        result:=foreachnodestatic(n,@check_for_sideeffect,nil);
+        result:=foreachnodestatic(n,@check_for_sideeffect,@flags);
       end;
 
     var
@@ -1445,7 +1480,8 @@ implementation
           exclude(p.localswitches, plocalswitchchange(plsc)^.cs);
         result:=fen_true;
      end;
-   
+
+
     procedure node_change_local_switch(p : tnode;cs : tlocalswitch;enable : boolean);
       var
         lsc : tlocalswitchchange;
@@ -1453,6 +1489,12 @@ implementation
         lsc.cs:=cs;
         lsc.enable:=enable;
         foreachnodestatic(p,@do_change_local_settings,@lsc);
+      end;
+
+
+    function doshortbooleval(p : tnode) : Boolean;
+      begin
+        Result:=(p.nodetype in [orn,andn]) and ((nf_short_bool in taddnode(p).flags) or not(cs_full_boolean_eval in p.localswitches));
       end;
 
 end.

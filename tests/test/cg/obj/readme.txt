@@ -41,6 +41,8 @@ Linux-mips : gcc (Debian 4.4.5-8) 4.4.5
 Android-arm    : GCC 4.7
 Android-i386   : GCC 4.7
 Android-mipsel : GCC 4.7
+Android-aarch64 : GCC 4.9
+Android-x86_64 : GCC 4.9
 haiku-i386 : gcc 2.95.3-haiku-100818
 aix-powerpc64 : gcc (GCC) 4.8.1 using "gcc -maix64" for TEST_CCOMPILER
                 on (AIX power-aix 1 7 00F84C0C4C00)
@@ -62,4 +64,4 @@ Data retrieved from Dwarf producer information:
 darwin-x86_64 : GNU C 4.0.1 (Apple Inc. build 5465)
 
 linux-aarch64 : gcc (Ubuntu/Linaro 4.8.4-2ubuntu1~14.04) 4.8.4
-
+linux-sparc64 : GCC: (Debian 7.3.0-10) 7.3.0

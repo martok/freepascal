@@ -80,7 +80,9 @@ const
     { 15 } 'i8086',
     { 16 } 'aarch64',
     { 17 } 'wasm',
-    { 18 } 'sparc64'
+    { 18 } 'sparc64',
+    { 19 } 'riscv32',
+    { 20 } 'riscv64'
     );
 
 { List of all supported system-cpu couples }
@@ -181,7 +183,13 @@ const
   { 92 }  'WebAssembly-wasm',
   { 93 }  'Linux-sparc64',
   { 94 }  'Solaris-sparc64',
-  { 95 }  'NetBSD-arm'
+  { 95 }  'NetBSD-arm',
+  { 96 }  'Linux-RiscV32',
+  { 97 }  'Linux-RiscV64',
+  { 98 }  'Embedded-RiscV32',
+  { 99 }  'Embedded-RiscV64',
+  { 100 } 'Android-AArch64',
+  { 101 } 'Android-x86-64'
   );
 
 const
@@ -537,10 +545,10 @@ begin
 end;
 
 
-function PPUFlags2Str(flags:longint):string;
+function PPUFlags2Str(flags:dword):string;
 type
   tflagopt=record
-    mask : longint;
+    mask : dword;
     str  : string[30];
   end;
 const
@@ -578,10 +586,11 @@ const
     (mask: $10000000;str:'i8086_cs_equals_ds'),
     (mask: $20000000;str:'package_deny'),
     (mask: $40000000;str:'package_weak'),
-    (mask: longint($80000000);str:'i8086_ss_equals_ds')
+    (mask: dword($80000000);str:'i8086_ss_equals_ds')
   );
 var
-  i,ntflags : longint;
+  i : longint;
+  ntflags : dword;
   first  : boolean;
   s : string;
 begin
@@ -654,6 +663,8 @@ end;
                              Read Routines
 ****************************************************************************}
 
+function readmanagementoperatoroptions(const space : string;const name : string):tmanagementoperators;forward;
+
 procedure readrecsymtableoptions;
 var
   usefieldalignment : shortint;
@@ -669,6 +680,7 @@ begin
   writeln([space,' recordalignmin: ',shortint(ppufile.getbyte)]);
   if (usefieldalignment=C_alignment) then
     writeln([space,' fieldalignment: ',shortint(ppufile.getbyte)]);
+  readmanagementoperatoroptions(space,'Fields have MOPs');
 end;
 
 procedure readsymtableoptions(const s: string);
@@ -1048,7 +1060,7 @@ begin
      Writeln([fileindex,' (',line,',',column,')']);
      if Def <> nil then
        begin
-         Def.FilePos.FileIndex:=fileindex - 1;
+         Def.FilePos.FileIndex:=fileindex;
          Def.FilePos.Line:=line;
          Def.FilePos.Col:=column;
        end;
@@ -1342,7 +1354,9 @@ const
          (mask:pi_calls_c_varargs;
          str:' calls function with C-style varargs '),
          (mask:pi_has_open_array_parameter;
-         str:' has open array parameter ')
+         str:' has open array parameter '),
+         (mask:pi_uses_threadvar;
+         str:' uses threadvars ')
   );
 var
   procinfooptions : tprocinfoflags;
@@ -1809,7 +1823,8 @@ begin
               begin
                 len:=gettokenbufsizeint;
                 setlength(astring,len);
-                move(tokenbuf[tbi],astring[1],len);
+                if len>0 then
+                  move(tokenbuf[tbi],astring[1],len);
                 write([' ',astring]);
                 inc(tbi,len);
               end;
@@ -2215,7 +2230,8 @@ type
 const
   piopt : array[low(timplprocoption)..high(timplprocoption)] of tpiopt=(
     (mask:pio_empty; str:'IsEmpty'),
-    (mask:pio_has_inlininginfo; str:'HasInliningInfo')
+    (mask:pio_has_inlininginfo; str:'HasInliningInfo'),
+    (mask:pio_inline_not_possible; str:'InlineNotPossible')
   );
 var
   i: timplprocoption;
@@ -2330,7 +2346,7 @@ end;
 
 
 
-function readmanagementoperatoroptions(const space : string):tmanagementoperators;
+function readmanagementoperatoroptions(const space : string;const name : string):tmanagementoperators;
 { type is in unit symconst }
 { Management operator options
   tmanagementoperator=(
@@ -2366,7 +2382,8 @@ begin
          if first then
            begin
              write(space);
-             write('Management operators: ');
+             write(name);
+             write(': ');
              first:=false;
            end
          else
@@ -2591,7 +2608,7 @@ begin
                    write  ([space,'  PointerType : ']);
                    readderef('',constdef.TypeRef);
                    constdef.ConstType:=ctInt;
-                   constdef.VInt:=getptruint;
+                   constdef.VInt:=int64(getptruint);
                    writeln([space,'        Value : ',constdef.VInt])
                  end;
                conststring,
@@ -2771,7 +2788,7 @@ begin
            begin
              def:=TPpuFieldDef.Create(ParentDef);
              readabstractvarsym('Field Variable symbol ',varoptions,TPpuVarDef(def));
-             writeln([space,'      Address : ',getaint]);
+             writeln([space,'      Address : ',getasizeint]);
              if vo_has_mangledname in varoptions then
                writeln([space,' Mangled name : ',getstring]);
            end;
@@ -2920,7 +2937,7 @@ procedure readdefinitions(const s:string; ParentDef: TPpuContainerDef);
     u8bit,u16bit,u32bit,u64bit,u128bit,
     s8bit,s16bit,s32bit,s64bit,s128bit,
     bool8bit,bool16bit,bool32bit,bool64bit,
-    uchar,uwidechar,scurrency
+    uchar,uwidechar,scurrency,customint
   ); }
 
 { type tobjecttyp is in symconst unit }
@@ -3056,6 +3073,12 @@ begin
                    orddef.OrdType:=otSInt;
                    orddef.Size:=16;
                  end;
+               pasbool1:
+                 begin
+                   writeln('pasbool1');
+                   orddef.OrdType:=otPasBool;
+                   orddef.Size:=1;
+                 end;
                pasbool8:
                  begin
                    writeln('pasbool8');
@@ -3122,6 +3145,12 @@ begin
                    orddef.OrdType:=otCurrency;
                    orddef.Size:=8;
                  end;
+               customint:
+                 begin
+                   writeln('customint');
+                   orddef.OrdType:=otSint;
+                   orddef.Size:=sizeof(ASizeInt);
+                 end
                else
                  WriteWarning('Invalid base type: ' + IntToStr(b));
              end;
@@ -3302,7 +3331,7 @@ begin
              strdef:=TPpuStringDef.Create(ParentDef);
              strdef.StrType:=stWide;
              readcommondef('WideString definition',defoptions,strdef);
-             strdef.Len:=getaint;
+             strdef.Len:=getasizeint;
              writeln([space,'           Length : ',strdef.Len]);
            end;
 
@@ -3311,7 +3340,7 @@ begin
              strdef:=TPpuStringDef.Create(ParentDef);
              strdef.StrType:=stUnicode;
              readcommondef('UnicodeString definition',defoptions,strdef);
-             strdef.Len:=getaint;
+             strdef.Len:=getasizeint;
              writeln([space,'           Length : ',strdef.Len]);
              writeln([space,'         Encoding : ',getword]);
            end;
@@ -3321,7 +3350,7 @@ begin
              strdef:=TPpuStringDef.Create(ParentDef);
              strdef.StrType:=stAnsi;
              readcommondef('AnsiString definition',defoptions,strdef);
-             strdef.Len:=getaint;
+             strdef.Len:=getasizeint;
              writeln([space,'           Length : ',strdef.Len]);
              writeln([space,'         Encoding : ',getword]);
            end;
@@ -3331,7 +3360,7 @@ begin
              strdef:=TPpuStringDef.Create(ParentDef);
              strdef.StrType:=stLong;
              readcommondef('Longstring definition',defoptions,strdef);
-             strdef.Len:=getaint;
+             strdef.Len:=getasizeint;
              writeln([space,'           Length : ',strdef.Len]);
            end;
 
@@ -3360,7 +3389,7 @@ begin
                  objdef.Size:=getasizeint;
                  writeln([space,'         DataSize : ',objdef.Size]);
                  writeln([space,'      PaddingSize : ',getword]);
-                 readmanagementoperatoroptions(space);
+                 readmanagementoperatoroptions(space,'Management operators');
                end;
              {read the record definitions and symbols}
              if not(df_copied_def in current_defoptions) then

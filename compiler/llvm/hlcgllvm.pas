@@ -47,6 +47,7 @@ uses
       procedure getcpuregister(list: TAsmList; r: Tregister); override;
       procedure ungetcpuregister(list: TAsmList; r: Tregister); override;
       procedure alloccpuregisters(list: TAsmList; rt: Tregistertype; const r: Tcpuregisterset); override;
+      procedure allocallcpuregisters(list: TAsmList); override;
       procedure deallocallcpuregisters(list: TAsmList); override;
 
       procedure a_bit_test_reg_reg_reg(list: TAsmList; bitnumbersize, valuesize, destsize: tdef; bitnumber, value, destreg: tregister); override;
@@ -86,6 +87,8 @@ uses
       procedure a_cmp_reg_reg_label(list: TAsmList; size: tdef; cmp_op: topcmp; reg1, reg2: tregister; l: tasmlabel); override;
 
       procedure a_jmp_always(list : TAsmList;l: tasmlabel); override;
+
+      procedure g_unreachable(list: TAsmList); override;
 
       procedure g_concatcopy(list : TAsmList;size: tdef; const source,dest : treference);override;
 
@@ -230,7 +233,7 @@ implementation
                    construction (the record is build from the paraloc
                    types) }
                  else if userecord then
-                   a_load_ref_reg(list,location^.def,location^.def,tmpref,location^.register)
+                   a_load_ref_reg(list,fielddef,location^.def,tmpref,location^.register)
                  { if the parameter is passed in a single paraloc, the
                    paraloc's type may be different from the declared type
                    -> use the original complete parameter size as source so
@@ -328,6 +331,12 @@ implementation
 
 
   procedure thlcgllvm.alloccpuregisters(list: TAsmList; rt: Tregistertype; const r: Tcpuregisterset);
+    begin
+      { don't do anything }
+    end;
+
+
+  procedure thlcgllvm.allocallcpuregisters(list: TAsmList);
     begin
       { don't do anything }
     end;
@@ -1037,7 +1046,7 @@ implementation
     begin
       { since all comparisons return their results in a register, we'll often
         get comparisons against true/false -> optimise }
-      if (size=pasbool8type) and
+      if (size=pasbool1type) and
          (cmp_op in [OC_EQ,OC_NE]) then
         begin
           { convert to an llvmbool1type and use directly }
@@ -1095,6 +1104,11 @@ implementation
       cg.a_jmp_always(list,l);
     end;
 
+  procedure thlcgllvm.g_unreachable(list: TAsmList);
+    begin
+      list.Concat(taillvm.op_none(la_unreachable));
+    end;
+
 
   procedure thlcgllvm.g_concatcopy(list: TAsmList; size: tdef; const source, dest: treference);
     var
@@ -1128,9 +1142,7 @@ implementation
       a_load_const_cgpara(list,u64inttype,size.size,sizepara);
       maxalign:=newalignment(max(source.alignment,dest.alignment),min(source.alignment,dest.alignment));
       a_load_const_cgpara(list,u32inttype,maxalign,alignpara);
-      { we don't know anything about volatility here, should become an extra
-        parameter to g_concatcopy }
-      a_load_const_cgpara(list,llvmbool1type,0,volatilepara);
+      a_load_const_cgpara(list,llvmbool1type,ord((vol_read in source.volatility) or (vol_write in dest.volatility)),volatilepara);
       g_call_system_proc(list,pd,[@destpara,@sourcepara,@sizepara,@alignpara,@volatilepara],nil).resetiftemp;
       sourcepara.done;
       destpara.done;
@@ -1496,7 +1508,7 @@ implementation
                     exit;
                 end;
               if fromsize<>tosize then
-                g_ptrtypecast_ref(list,cpointerdef.create(fromsize),cpointerdef.create(tosize),href);
+                g_ptrtypecast_ref(list,cpointerdef.getreusable(fromsize),cpointerdef.getreusable(tosize),href);
               { %reg = load size* %ref }
               list.concat(taillvm.op_reg_size_ref(la_load,reg,cpointerdef.getreusable(tosize),href));
             end;
@@ -1788,7 +1800,7 @@ implementation
 
   function thlcgllvm.make_simple_ref(list: TAsmList; const ref: treference; def: tdef): treference;
     begin
-      result:=make_simple_ref_ptr(list,ref,cpointerdef.create(def));
+      result:=make_simple_ref_ptr(list,ref,cpointerdef.getreusable(def));
     end;
 
 

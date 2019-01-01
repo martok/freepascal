@@ -102,6 +102,8 @@ unit agarmgas;
     function TArmGNUAssembler.MakeCmdLine: TCmdStr;
       begin
         result:=inherited MakeCmdLine;
+        if tf_section_threadvars in target_info.flags then
+          result:='-mtls-dialect=gnu '+result;
         if (current_settings.fputype = fpu_soft) then
           result:='-mfpu=softvfp '+result;
         if (current_settings.fputype = fpu_vfpv2) then
@@ -124,7 +126,11 @@ unit agarmgas;
 
         if target_info.abi = abi_eabihf then
           { options based on what gcc uses on debian armhf }
-          result:='-mfloat-abi=hard -meabi=5 '+result;
+          result:='-mfloat-abi=hard -meabi=5 '+result
+        else if (target_info.abi = abi_eabi) and not(current_settings.fputype = fpu_soft) then
+          result:='-mfloat-abi=softfp -meabi=5 '+result
+        else if (target_info.abi = abi_eabi) and (current_settings.fputype = fpu_soft) then
+          result:='-mfloat-abi=soft -meabi=5 '+result;
       end;
 
     procedure TArmGNUAssembler.WriteExtraHeader;

@@ -1026,7 +1026,7 @@ begin
     result := FpFcntl(ASocket, F_SetFl, flags and (not O_NONBLOCK)) = 0;
 {$endif}
 {$ifdef windows}
-  result := ioctlsocket(ASocket,FIONBIO,@ABlockMode) = 0;
+  result := ioctlsocket(ASocket,longint(FIONBIO),@ABlockMode) = 0;
 {$endif}
 end;
 
@@ -1076,12 +1076,14 @@ end;
 
 procedure TInetSocket.Connect;
 
+{$IFDEF HAVENONBLOCKING}
 Const
  {$IFDEF UNIX}
     ErrWouldBlock = ESysEInprogress;
  {$ELSE}
     ErrWouldBlock = WSAEWOULDBLOCK;
  {$ENDIF}
+{$ENDIF}
 
 Var
   A : THostAddr;

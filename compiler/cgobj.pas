@@ -437,6 +437,8 @@ unit cgobj;
 
           { initialize the pic/got register }
           procedure g_maybe_got_init(list: TAsmList); virtual;
+          { initialize the tls register if needed }
+          procedure g_maybe_tls_init(list : TAsmList); virtual;
           { allocallcpuregisters, a_call_name, deallocallcpuregisters sequence }
           procedure g_call(list: TAsmList; const s: string);
           { Generate code to exit an unwind-protected region. The default implementation
@@ -445,6 +447,10 @@ unit cgobj;
           { Generate code for integer division by constant,
             generic version is suitable for 3-address CPUs }
           procedure g_div_const_reg_reg(list:tasmlist; size: TCgSize; a: tcgint; src,dst: tregister); virtual;
+
+          { some CPUs do not support hardware fpu exceptions, this procedure is called after instructions which
+            might set FPU exception related flags, so it has to check these flags if needed and throw an exeception }
+          procedure g_check_for_fpu_exception(list: TAsmList); virtual;
 
          protected
           function g_indirect_sym_load(list:TAsmList;const symname: string; const flags: tindsymflags): tregister;virtual;
@@ -1921,11 +1927,20 @@ implementation
     procedure tcg.a_op_const_ref(list : TAsmList; Op: TOpCG; size: TCGSize; a: tcgint; const ref: TReference);
       var
         tmpreg : tregister;
+        tmpref : treference;
       begin
+        if assigned(ref.symbol) then
+          begin
+            tmpreg:=getaddressregister(list);
+            a_loadaddr_ref_reg(list,ref,tmpreg);
+            reference_reset_base(tmpref,tmpreg,0,ref.temppos,ref.alignment,[]);
+          end
+        else
+          tmpref:=ref;
         tmpreg:=getintregister(list,size);
-        a_load_ref_reg(list,size,size,ref,tmpreg);
+        a_load_ref_reg(list,size,size,tmpref,tmpreg);
         a_op_const_reg(list,op,size,a,tmpreg);
-        a_load_reg_ref(list,size,size,tmpreg,ref);
+        a_load_reg_ref(list,size,size,tmpreg,tmpref);
       end;
 
 
@@ -1945,9 +1960,18 @@ implementation
     procedure tcg.a_op_reg_ref(list : TAsmList; Op: TOpCG; size: TCGSize;reg: TRegister;  const ref: TReference);
       var
         tmpreg : tregister;
+        tmpref : treference;
       begin
+        if assigned(ref.symbol) then
+          begin
+            tmpreg:=getaddressregister(list);
+            a_loadaddr_ref_reg(list,ref,tmpreg);
+            reference_reset_base(tmpref,tmpreg,0,ref.temppos,ref.alignment,[]);
+          end
+        else
+          tmpref:=ref;
         tmpreg:=getintregister(list,size);
-        a_load_ref_reg(list,size,size,ref,tmpreg);
+        a_load_ref_reg(list,size,size,tmpref,tmpreg);
         if op in [OP_NEG,OP_NOT] then
           begin
             if reg<>NR_NO then
@@ -1956,7 +1980,7 @@ implementation
           end
         else
           a_op_reg_reg(list,op,size,reg,tmpreg);
-        a_load_reg_ref(list,size,size,tmpreg,ref);
+        a_load_reg_ref(list,size,size,tmpreg,tmpref);
       end;
 
 
@@ -2759,6 +2783,12 @@ implementation
       begin
       end;
 
+
+    procedure tcg.g_maybe_tls_init(list: TAsmList);
+      begin
+      end;
+
+
     procedure tcg.g_call(list: TAsmList;const s: string);
       begin
         allocallcpuregisters(list);
@@ -2873,6 +2903,12 @@ implementation
           end
         else
           InternalError(2014060601);
+      end;
+
+
+    procedure tcg.g_check_for_fpu_exception(list: TAsmList);
+      begin
+        { empty by default }
       end;
 
 

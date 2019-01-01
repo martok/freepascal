@@ -42,9 +42,11 @@ interface
     {# Returns the minimal value between @var(a) and @var(b) }
     function min(a,b : longint) : longint;{$ifdef USEINLINE}inline;{$endif}
     function min(a,b : int64) : int64;{$ifdef USEINLINE}inline;{$endif}
+    function min(a,b : qword) : qword;{$ifdef USEINLINE}inline;{$endif}
     {# Returns the maximum value between @var(a) and @var(b) }
     function max(a,b : longint) : longint;{$ifdef USEINLINE}inline;{$endif}
     function max(a,b : int64) : int64;{$ifdef USEINLINE}inline;{$endif}
+    function max(a,b : qword) : qword;{$ifdef USEINLINE}inline;{$endif}
 
     { These functions are intenionally put here and not in the constexp unit.
       Since Tconstexprint may be automatically converted to int, which causes
@@ -142,7 +144,8 @@ interface
 
     { allocates mem for a copy of s, copies s to this mem and returns }
     { a pointer to this mem                                           }
-    function stringdup(const s : string) : pshortstring;{$ifdef USEINLINE}inline;{$endif}
+    function stringdup(const s : shortstring) : pshortstring;{$ifdef USEINLINE}inline;{$endif}
+    function stringdup(const s : ansistring) : pshortstring;{$ifdef USEINLINE}inline;{$endif}
 
     {# Allocates memory for the string @var(s) and copies s as zero
        terminated string to that allocated memory and returns a pointer
@@ -227,6 +230,18 @@ implementation
       end;
 
 
+    function min(a,b : qword) : qword;
+    {
+      return the minimal of a and b
+    }
+      begin
+         if a<=b then
+           min:=a
+         else
+           min:=b;
+      end;
+
+
     function max(a,b : longint) : longint;{$ifdef USEINLINE}inline;{$endif}
     {
       return the maximum of a and b
@@ -240,6 +255,18 @@ implementation
 
 
     function max(a,b : int64) : int64;{$ifdef USEINLINE}inline;{$endif}
+    {
+      return the maximum of a and b
+    }
+      begin
+         if a>=b then
+           max:=a
+         else
+           max:=b;
+      end;
+
+
+    function max(a,b : qword) : qword;{$ifdef USEINLINE}inline;{$endif}
     {
       return the maximum of a and b
     }
@@ -320,9 +347,9 @@ implementation
         else
           begin
             if i<0 then
-              result:=((i-a+1) div a) * a
+              result:=((i+1-a) div a) * a
             else
-              result:=((i+a-1) div a) * a;
+              result:=((i-1+a) div a) * a;
           end;
       end;
 
@@ -338,9 +365,9 @@ implementation
         else
           begin
             if i<0 then
-              result:=((i-a+1) div a) * a
+              result:=((i+1-a) div a) * a
             else
-              result:=((i+a-1) div a) * a;
+              result:=((i-1+a) div a) * a;
           end;
       end;
 
@@ -351,10 +378,10 @@ implementation
     }
       begin
         { for 0 and 1 no aligning is needed }
-        if a<=1 then
+        if (a<=1) or (i=0) then
           result:=i
         else
-          result:=((i+a-1) div a) * a;
+          result:=((i-1+a) div a) * a;
       end;
 
 
@@ -1195,12 +1222,18 @@ implementation
       end;
 
 
-    function stringdup(const s : string) : pshortstring;{$ifdef USEINLINE}inline;{$endif}
+    function stringdup(const s : shortstring) : pshortstring;{$ifdef USEINLINE}inline;{$endif}
       begin
          getmem(result,length(s)+1);
          result^:=s;
       end;
 
+
+    function stringdup(const s : ansistring) : pshortstring;{$ifdef USEINLINE}inline;{$endif}
+      begin
+         getmem(result,length(s)+1);
+         result^:=s;
+      end;
 
     function CompareStr(const S1, S2: string): Integer;
       var

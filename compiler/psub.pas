@@ -47,9 +47,8 @@ interface
         loadpara_asmnode,
         exitlabel_asmnode,
         stackcheck_asmnode,
-        init_asmnode,
-        final_asmnode : tasmnode;
-        final_used : boolean;
+        init_asmnode    : tasmnode;
+        temps_finalized : boolean;
         dfabuilder : TDFABuilder;
 
         destructor  destroy;override;
@@ -93,7 +92,7 @@ implementation
     uses
        sysutils,
        { common }
-       cutils,
+       cutils, cmsgs,
        { global }
        globtype,tokens,verbose,comphook,constexp,
        systems,cpubase,aasmbase,aasmtai,aasmdata,
@@ -138,6 +137,14 @@ implementation
        ;
 
     function checknodeinlining(procdef: tprocdef): boolean;
+
+      procedure _no_inline(const reason: TMsgStr);
+        begin
+          include(procdef.implprocoptions,pio_inline_not_possible);
+          Message1(parser_n_not_supported_for_inline,reason);
+          Message(parser_h_inlining_disabled);
+        end;
+
       var
         i : integer;
         currpara : tparavarsym;
@@ -150,26 +157,22 @@ implementation
           exit;
         if pi_has_assembler_block in current_procinfo.flags then
           begin
-            Message1(parser_h_not_supported_for_inline,'assembler');
-            Message(parser_h_inlining_disabled);
+            _no_inline('assembler');
             exit;
           end;
         if pi_has_global_goto in current_procinfo.flags then
           begin
-            Message1(parser_h_not_supported_for_inline,'global goto');
-            Message(parser_h_inlining_disabled);
+            _no_inline('global goto');
             exit;
           end;
         if pi_has_nested_exit in current_procinfo.flags then
           begin
-            Message1(parser_h_not_supported_for_inline,'nested exit');
-            Message(parser_h_inlining_disabled);
+            _no_inline('nested exit');
             exit;
           end;
         if pi_calls_c_varargs in current_procinfo.flags then
           begin
-            Message1(parser_h_not_supported_for_inline,'called C-style varargs functions');
-            Message(parser_h_inlining_disabled);
+            _no_inline('called C-style varargs functions');
             exit;
           end;
         { the compiler cannot handle inherited in inlined subroutines because
@@ -177,8 +180,7 @@ implementation
           is not available }
         if pi_has_inherited in current_procinfo.flags then
           begin
-            Message1(parser_h_not_supported_for_inline,'inherited');
-            Message(parser_h_inlining_disabled);
+            _no_inline('inherited');
             exit;
           end;
         for i:=0 to procdef.paras.count-1 do
@@ -189,8 +191,7 @@ implementation
                 begin
                   if (currpara.varspez in [vs_out,vs_var,vs_const,vs_constref]) then
                     begin
-                      Message1(parser_h_not_supported_for_inline,'formal parameter');
-                      Message(parser_h_inlining_disabled);
+                      _no_inline('formal parameter');
                       exit;
                     end;
                 end;
@@ -199,8 +200,7 @@ implementation
                   if is_array_of_const(currpara.vardef) or
                      is_variant_array(currpara.vardef) then
                     begin
-                      Message1(parser_h_not_supported_for_inline,'array of const');
-                      Message(parser_h_inlining_disabled);
+                      _no_inline('array of const');
                       exit;
                     end;
                   { open arrays might need re-basing of the index, i.e. if you pass
@@ -208,8 +208,7 @@ implementation
                     if you directly inline it }
                   if is_open_array(currpara.vardef) then
                     begin
-                      Message1(parser_h_not_supported_for_inline,'open array');
-                      Message(parser_h_inlining_disabled);
+                      _no_inline('open array');
                       exit;
                     end;
                 end;
@@ -678,8 +677,6 @@ implementation
      destructor tcgprocinfo.destroy;
        begin
          code.free;
-         if not final_used then
-           final_asmnode.free;
          inherited destroy;
        end;
 
@@ -768,9 +765,10 @@ implementation
                   (cs_implicit_exceptions in current_settings.moduleswitches)) then
                   begin
                     include(tocode.flags,nf_block_with_exit);
-                    addstatement(newstatement,final_asmnode);
+                    if procdef.proctypeoption<>potype_exceptfilter then
+                      addstatement(newstatement,cfinalizetempsnode.create);
                     cnodeutils.procdef_block_add_implicit_finalize_nodes(procdef,newstatement);
-                    final_used:=true;
+                    temps_finalized:=true;
                   end;
 
                 { construction successful -> beforedestruction should be called
@@ -880,8 +878,7 @@ implementation
         { Generate code/locations used at end of proc }
         current_filepos:=exitpos;
         exitlabel_asmnode:=casmnode.create_get_position;
-        final_asmnode:=casmnode.create_get_position;
-        final_used:=false;
+        temps_finalized:=false;
         bodyexitcode:=generate_bodyexit_block;
 
         { Generate procedure by combining init+body+final,
@@ -895,6 +892,18 @@ implementation
         addstatement(newstatement,entry_asmnode);
         cnodeutils.procdef_block_add_implicit_initialize_nodes(procdef,newstatement);
         addstatement(newstatement,init_asmnode);
+        if assigned(procdef.parentfpinitblock) then
+          begin
+            if assigned(tblocknode(procdef.parentfpinitblock).left) then
+              begin
+                { could be an asmn in case of a pure assembler procedure,
+                  but those shouldn't access nested variables }
+                addstatement(newstatement,procdef.parentfpinitblock);
+              end
+            else
+              procdef.parentfpinitblock.free;
+            procdef.parentfpinitblock:=nil;
+          end;
         addstatement(newstatement,bodyentrycode);
 
         if (cs_implicit_exceptions in current_settings.moduleswitches) and
@@ -914,16 +923,14 @@ implementation
             current_filepos:=exitpos;
             { Generate code that will be in the try...finally }
             finalcode:=internalstatements(codestatement);
-            addstatement(codestatement,final_asmnode);
+            if procdef.proctypeoption<>potype_exceptfilter then
+              addstatement(codestatement,cfinalizetempsnode.create);
             cnodeutils.procdef_block_add_implicit_finalize_nodes(procdef,codestatement);
-            final_used:=true;
+            temps_finalized:=true;
 
             current_filepos:=entrypos;
-            wrappedbody:=ctryfinallynode.create_implicit(
-               code,
-               finalcode,
-               cnothingnode.create);
-            { afterconstruction must be called after final_asmnode, because it
+            wrappedbody:=ctryfinallynode.create_implicit(code,finalcode);
+            { afterconstruction must be called after finalizetemps, because it
                has to execute after the temps have been finalised in case of a
                refcounted class (afterconstruction decreases the refcount
                without freeing the instance if the count becomes nil, while
@@ -950,12 +957,13 @@ implementation
             addstatement(newstatement,bodyexitcode);
             if not is_constructor then
               begin
-                addstatement(newstatement,final_asmnode);
+                if procdef.proctypeoption<>potype_exceptfilter then
+                  addstatement(newstatement,cfinalizetempsnode.create);
                 cnodeutils.procdef_block_add_implicit_finalize_nodes(procdef,newstatement);
-                final_used:=true;
+                temps_finalized:=true;
               end;
           end;
-        if not final_used then
+        if not temps_finalized then
           begin
             current_filepos:=exitpos;
             cnodeutils.procdef_block_add_implicit_finalize_nodes(procdef,newstatement);
@@ -990,7 +998,7 @@ implementation
       end;
 
 
-{$if defined(i386) or defined(x86_64) or defined(arm)}
+{$if defined(i386) or defined(x86_64) or defined(arm) or defined(riscv32) or defined(riscv64)}
     const
       exception_flags: array[boolean] of tprocinfoflags = (
         [],
@@ -1206,6 +1214,46 @@ implementation
         procdef.has_inlininginfo:=true;
        end;
 
+    procedure searchthreadvar(p: TObject; arg: pointer);
+      var
+        i : longint;
+        pd : tprocdef;
+      begin
+        case tsym(p).typ of
+          staticvarsym :
+            begin
+                  { local (procedure or unit) variables only need finalization
+                    if they are used
+                  }
+              if (vo_is_thread_var in tstaticvarsym(p).varoptions) and
+                 ((tstaticvarsym(p).refs>0) or
+                  { global (unit) variables always need finalization, since
+                    they may also be used in another unit
+                  }
+                  (tstaticvarsym(p).owner.symtabletype=globalsymtable)) and
+                  (
+                    (tstaticvarsym(p).varspez<>vs_const) or
+                    (vo_force_finalize in tstaticvarsym(p).varoptions)
+                  ) and
+                 not(vo_is_funcret in tstaticvarsym(p).varoptions) and
+                 not(vo_is_external in tstaticvarsym(p).varoptions) and
+                 is_managed_type(tstaticvarsym(p).vardef) then
+                include(current_procinfo.flags,pi_uses_threadvar);
+            end;
+          procsym :
+            begin
+              for i:=0 to tprocsym(p).ProcdefList.Count-1 do
+                begin
+                  pd:=tprocdef(tprocsym(p).ProcdefList[i]);
+                  if assigned(pd.localst) and
+                     (pd.procsym=tprocsym(p)) and
+                     (pd.localst.symtabletype<>staticsymtable) then
+                    pd.localst.SymList.ForEachCall(@searchthreadvar,arg);
+                end;
+            end;
+        end;
+      end;
+
 
     function searchusercode(var n: tnode; arg: pointer): foreachnoderesult;
       begin
@@ -1232,6 +1280,19 @@ implementation
 
 
     procedure tcgprocinfo.generate_code;
+
+       procedure check_for_threadvars_in_initfinal;
+         begin
+           if current_procinfo.procdef.proctypeoption=potype_unitfinalize then
+             begin
+                { this is also used for initialization of variables in a
+                  program which does not have a globalsymtable }
+                if assigned(current_module.globalsymtable) then
+                  TSymtable(current_module.globalsymtable).SymList.ForEachCall(@searchthreadvar,nil);
+                TSymtable(current_module.localsymtable).SymList.ForEachCall(@searchthreadvar,nil);
+             end;
+         end;
+
       var
         old_current_procinfo : tprocinfo;
         oldmaxfpuregisters : longint;
@@ -1429,6 +1490,10 @@ implementation
           (code.nodetype=blockn) and (tblocknode(code).statements=nil) then
           procdef.isempty:=true;
 
+        { unit static/global symtables might contain threadvars which are not explicitly used but which might
+          require a tls register, so check for such variables }
+        check_for_threadvars_in_initfinal;
+
         { add implicit entry and exit code }
         add_entry_exit_code;
 
@@ -1453,6 +1518,9 @@ implementation
 
             { allocate got register if needed }
             allocate_got_register(aktproccode);
+
+            if pi_uses_threadvar in flags then
+              allocate_tls_register(aktproccode);
 
             { Allocate space in temp/registers for parast and localst }
             current_filepos:=entrypos;
@@ -1512,16 +1580,13 @@ implementation
 
             if assigned(finalize_procinfo) then
               generate_exceptfilter(tcgprocinfo(finalize_procinfo))
-            else
+            else if not temps_finalized then
               begin
                 hlcg.gen_finalize_code(templist);
                 { the finalcode must be concated if there was no position available,
                   using insertlistafter will result in an insert at the start
                   when currentai=nil }
-                if assigned(final_asmnode) and assigned(final_asmnode.currenttai) then
-                  aktproccode.insertlistafter(final_asmnode.currenttai,templist)
-                else
-                  aktproccode.concatlist(templist);
+                aktproccode.concatlist(templist);
               end;
             { insert exit label at the correct position }
             hlcg.a_label(templist,CurrExitLabel);
@@ -1564,6 +1629,10 @@ implementation
                (got<>NR_NO) then
               cg.a_reg_sync(aktproccode,got);
 
+            if (pi_uses_threadvar in flags) and
+              (tlsoffset<>NR_NO) then
+              cg.a_reg_sync(aktproccode,tlsoffset);
+
             gen_free_symtable(aktproccode,procdef.localst);
             gen_free_symtable(aktproccode,procdef.parast);
 
@@ -1582,7 +1651,7 @@ implementation
               begin
                 current_filepos:=entrypos;
                 hlcg.gen_stack_check_call(templist);
-                aktproccode.insertlistafter(stackcheck_asmnode.currenttai,templist)
+                aktproccode.insertlistafter(stackcheck_asmnode.currenttai,templist);
               end;
 
             { this code (got loading) comes before everything which has }
@@ -1602,8 +1671,12 @@ implementation
             current_filepos:=entrypos;
             { load got if necessary }
             cg.g_maybe_got_init(templist);
-
             aktproccode.insertlistafter(headertai,templist);
+
+            if (pi_uses_threadvar in flags) and (tf_section_threadvars in target_info.flags) then
+              cg.g_maybe_tls_init(templist);
+            aktproccode.insertlistafter(stackcheck_asmnode.currenttai,templist);
+
 
             { re-enable if more code at the end is ever generated here
             cg.set_regalloc_live_range_direction(rad_forward);
@@ -1688,7 +1761,6 @@ implementation
             delete_marker(exitlabel_asmnode);
             delete_marker(stackcheck_asmnode);
             delete_marker(init_asmnode);
-            delete_marker(final_asmnode);
 
 {$ifndef NoOpt}
             if not(cs_no_regalloc in current_settings.globalswitches) then
@@ -1815,6 +1887,7 @@ implementation
          old_current_structdef: tabstractrecorddef;
          old_current_genericdef,
          old_current_specializedef: tstoreddef;
+         parentfpinitblock: tnode;
          old_parse_generic: boolean;
          recordtokens : boolean;
 
@@ -1927,16 +2000,10 @@ implementation
                begin
                  if assigned(tblocknode(procdef.parentfpinitblock).left) then
                    begin
-                     { could be an asmn in case of a pure assembler procedure,
-                       but those shouldn't access nested variables }
-                     if code.nodetype<>blockn then
-                       internalerror(2015122601);
-                     tblocknode(code).left:=cstatementnode.create(procdef.parentfpinitblock,tblocknode(code).left);
-                     do_typecheckpass(tblocknode(code).left);
+                     parentfpinitblock:=procdef.parentfpinitblock;
+                     do_typecheckpass(parentfpinitblock);
+                     procdef.parentfpinitblock:=parentfpinitblock;
                    end
-                 else
-                   procdef.parentfpinitblock.free;
-                 procdef.parentfpinitblock:=nil;
                end;
 
            end;
@@ -2063,7 +2130,7 @@ implementation
           begin
             if (po_inline in current_procinfo.procdef.procoptions) then
               begin
-                Message1(parser_h_not_supported_for_inline,'nested procedures');
+                Message1(parser_n_not_supported_for_inline,'nested procedures');
                 Message(parser_h_inlining_disabled);
                 exclude(current_procinfo.procdef.procoptions,po_inline);
               end;
@@ -2135,9 +2202,12 @@ implementation
         old_current_genericdef,
         old_current_specializedef: tstoreddef;
         pdflags    : tpdflags;
-        def,pd,firstpd : tprocdef;
+        pd,firstpd : tprocdef;
+{$ifdef genericdef_for_nested}
+        def : tprocdef;
         srsym : tsym;
         i : longint;
+{$endif genericdef_for_nested}
       begin
          { save old state }
          old_current_procinfo:=current_procinfo;
@@ -2242,6 +2312,10 @@ implementation
              if df_specialization in old_current_procinfo.procdef.defoptions then
                begin
                  include(pd.defoptions,df_specialization);
+                 { the procdefs encountered here are nested procdefs of which
+                   their complete definition also resides inside the current token
+                   stream, thus access to their genericdef is not required }
+                 {$ifdef genericdef_for_nested}
                  { find the corresponding routine in the generic routine }
                  if not assigned(old_current_procinfo.procdef.genericdef) then
                    internalerror(2016121701);
@@ -2265,6 +2339,7 @@ implementation
                    end;
                  if not assigned(pd.genericdef) then
                    internalerror(2016121703);
+                 {$endif}
                end;
            end;
 

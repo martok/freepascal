@@ -347,12 +347,14 @@ implementation
                 encodedstr:=encodedstr+'void'
               { mainly required because comparison operations return i1, and
                 we need a way to represent the i1 type in Pascal. We don't
-                reuse pasbool8type, because putting an i1 in a record or
+                reuse pasbool1type, because putting an i1 in a record or
                 passing it as a parameter may result in unexpected behaviour }
               else if def=llvmbool1type then
                 encodedstr:=encodedstr+'i1'
+              else if torddef(def).ordtype<>customint then
+                encodedstr:=encodedstr+'i'+tostr(def.size*8)
               else
-                encodedstr:=encodedstr+'i'+tostr(def.size*8);
+                encodedstr:=encodedstr+'i'+tostr(def.packedbitsize);
             end;
           pointerdef :
             begin
@@ -688,9 +690,7 @@ implementation
           llvmextractvalueextinfo(hp.vardef,usedef,signext);
           { implicit zero/sign extension for ABI compliance? }
           if not first then
-             encodedstr:=encodedstr+', '
-          else
-            first:=false;
+             encodedstr:=encodedstr+', ';
           llvmaddencodedtype_intern(usedef,[],encodedstr);
           { in case signextstr<>'', there should be only one paraloc -> no need
             to clear (reason: it means that the paraloc is larger than the
@@ -724,6 +724,41 @@ implementation
                 encodedstr:=encodedstr+'* byval'
               else
                 encodedstr:=encodedstr+'*';
+            end
+          else if withattributes and
+             paramanager.push_addr_param(hp.varspez,hp.vardef,proccalloption) then
+            begin
+              { it's not valid to take the address of a parameter and store it for
+                use past the end of the function call (since the address can always
+                be on the stack and become invalid later) }
+              encodedstr:=encodedstr+' nocapture';
+              { open array/array of const/variant array may be a valid pointer but empty }
+              if not is_special_array(hp.vardef) and
+                 { e.g. empty records }
+                 (hp.vardef.size<>0) then
+                begin
+                  case hp.varspez of
+                    vs_value,
+                    vs_const:
+                      begin
+                        encodedstr:=encodedstr+' nocapture dereferenceable('
+                      end;
+                    vs_var,
+                    vs_out,
+                    vs_constref:
+                      begin
+                        { while normally these are not nil, it is technically possible
+                          to pass nil via ptrtype(nil)^ }
+                        encodedstr:=encodedstr+' nocapture dereferenceable_or_null('
+                      end;
+                    else
+                      internalerror(2018120801);
+                  end;
+                  if hp.vardef.typ<>formaldef then
+                    encodedstr:=encodedstr+tostr(hp.vardef.size)+')'
+                  else
+                    encodedstr:=encodedstr+'1)';
+                end;
             end;
           if withparaname then
             begin
@@ -732,6 +767,7 @@ implementation
               encodedstr:=encodedstr+' '+llvmasmsymname(paraloc^.llvmloc.sym);
             end;
           paraloc:=paraloc^.next;
+          first:=false;
         until not assigned(paraloc);
       end;
 
@@ -824,6 +860,7 @@ implementation
                 case torddef(hdef).ordtype of
                   s8bit,
                   u8bit,
+                  pasbool1,
                   pasbool8:
                     typename:=typename+'i8';
                   s16bit,
@@ -835,6 +872,8 @@ implementation
                   s64bit,
                   u64bit:
                     typename:=typename+'i64';
+                  customint:
+                    typename:=typename+'i'+tostr(torddef(hdef).packedbitsize);
                   else
                     { other types should not appear currently, add as needed }
                     internalerror(2014012001);
@@ -875,6 +914,7 @@ implementation
         usedef: tdef;
         valueext: tllvmvalueextension;
         i: longint;
+        sizeleft: asizeint;
       begin
         { single location }
         if not assigned(cgpara.location^.next) then
@@ -902,10 +942,38 @@ implementation
         { multiple locations -> create temp record }
         retloc:=cgpara.location;
         i:=0;
+        sizeleft:=cgpara.Def.size;
         repeat
           if i>high(retdeflist) then
             internalerror(2016121801);
-          retdeflist[i]:=retloc^.def;
+          if assigned(retloc^.next) then
+            begin
+              retdeflist[i]:=retloc^.def;
+              dec(sizeleft,retloc^.def.size);
+            end
+          else if retloc^.def.size<>sizeleft then
+            begin
+              case sizeleft of
+                1:
+                  retdeflist[i]:=u8inttype;
+                2:
+                  retdeflist[i]:=u16inttype;
+                3:
+                  retdeflist[i]:=u24inttype;
+                4:
+                  retdeflist[i]:=u32inttype;
+                5:
+                  retdeflist[i]:=u40inttype;
+                6:
+                  retdeflist[i]:=u48inttype;
+                7:
+                  retdeflist[i]:=u56inttype;
+                else
+                  retdeflist[i]:=retloc^.def;
+              end
+            end
+          else
+            retdeflist[i]:=retloc^.def;
           inc(i);
           retloc:=retloc^.next;
         until not assigned(retloc);

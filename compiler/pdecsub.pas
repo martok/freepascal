@@ -583,7 +583,6 @@ implementation
         index : longint;
         hadspecialize,
         firstpart,
-        freegenericparams,
         found,
         searchagain : boolean;
         st,
@@ -671,7 +670,7 @@ implementation
           begin
             lasttoken:=token;
             lastidtoken:=idtoken;
-            if assigned(genericparams) and freegenericparams then
+            if assigned(genericparams) then
               for i:=0 to genericparams.count-1 do
                 begin
                   sym:=ttypesym(genericparams[i]);
@@ -857,6 +856,34 @@ implementation
               sp:='';
           end;
 
+        function check_generic_parameters(def:tstoreddef):boolean;
+          var
+            i : longint;
+            decltype,
+            impltype : ttypesym;
+            implname : tsymstr;
+          begin
+            result:=true;
+            if not assigned(def.genericparas) then
+              internalerror(2018090102);
+            if not assigned(genericparams) then
+              internalerror(2018090103);
+            if def.genericparas.count<>genericparams.count then
+              internalerror(2018090104);
+            for i:=0 to def.genericparas.count-1 do
+              begin
+                decltype:=ttypesym(def.genericparas[i]);
+                impltype:=ttypesym(genericparams[i]);
+                implname:=upper(genericparams.nameofindex(i));
+                if decltype.name<>implname then
+                  begin
+                    messagepos1(impltype.fileinfo,sym_e_generic_type_param_mismatch,impltype.realname);
+                    messagepos1(decltype.fileinfo,sym_e_generic_type_param_decl,decltype.realname);
+                    result:=false;
+                  end;
+              end;
+          end;
+
       begin
         sp:='';
         orgsp:='';
@@ -873,7 +900,6 @@ implementation
         aprocsym:=nil;
         srsym:=nil;
         genericparams:=nil;
-        freegenericparams:=true;
         hadspecialize:=false;
 
         if not assigned(genericdef) then
@@ -953,6 +979,17 @@ implementation
                  if not assigned(astruct) and not assigned(srsym) then
                    srsym:=search_object_name(sp,true);
                  current_filepos:=oldfilepos;
+
+                 { we need to check whether the names of the generic parameter
+                   types match with the one in the declaration of a class/record,
+                   but we need to do this before consume_proc_name frees the
+                   type parameters of the class part }
+                 if (srsym.typ=typesym) and
+                     (ttypesym(srsym).typedef.typ in [objectdef,recorddef]) and
+                     tstoreddef(ttypesym(srsym).typedef).is_generic and
+                     assigned(genericparams) then
+                   { this is recoverable, so no further action necessary }
+                   check_generic_parameters(tstoreddef(ttypesym(srsym).typedef));
 
                  { consume proc name }
                  procstartfilepos:=current_tokenpos;
@@ -1125,8 +1162,10 @@ implementation
                  tstoreddef(ttypesym(genericparams[i]).typedef).register_def;
               end;
             insert_generic_parameter_types(pd,nil,genericparams);
+            { the list is no longer required }
+            genericparams.free;
+            genericparams:=nil;
             symtablestack.pop(pd.parast);
-            freegenericparams:=false;
             parse_generic:=true;
             { also generate a dummy symbol if none exists already }
             if assigned(astruct) then
@@ -1151,9 +1190,8 @@ implementation
             { start token recorder for the declaration }
             pd.init_genericdecl;
             current_scanner.startrecordtokens(pd.genericdecltokenbuf);
-          end;
-
-        if assigned(genericdef) and not assigned(genericparams) then
+          end
+        else if assigned(genericdef) then
           insert_generic_parameter_types(pd,tstoreddef(genericdef),generictypelist);
 
         { methods inherit df_generic or df_specialization from the objectdef }
@@ -2574,7 +2612,11 @@ const
       idtok:_INTERRUPT;
       pd_flags : [pd_implemen,pd_body,pd_notobject,pd_notobjintf,pd_notrecord,pd_nothelper];
       handler  : @pd_interrupt;
+{$ifdef i386}
       pocall   : pocall_oldfpccall;
+{$else i386}
+      pocall   : pocall_stdcall;
+{$endif i386}
       pooption : [po_interrupt];
       mutexclpocall : [pocall_internproc,pocall_cdecl,pocall_cppdecl,pocall_stdcall,pocall_mwpascal,
                        pocall_pascal,pocall_far16,pocall_oldfpccall,pocall_sysv_abi_cdecl,pocall_ms_abi_cdecl];
@@ -2918,8 +2960,7 @@ const
       }
       var
         p     : longint;
-        name,
-        other : TIDString;
+        name : TIDString;
         po_comp : tprocoptions;
         tokenloc : TFilePosInfo;
       begin
@@ -3502,6 +3543,29 @@ const
     function proc_add_definition(var currpd:tprocdef):boolean;
 
 
+      function check_generic_parameters(fwpd,currpd:tprocdef):boolean;
+        var
+          i : longint;
+          fwtype,
+          currtype : ttypesym;
+        begin
+          result:=true;
+          if fwpd.genericparas.count<>currpd.genericparas.count then
+            internalerror(2018090101);
+          for i:=0 to fwpd.genericparas.count-1 do
+            begin
+              fwtype:=ttypesym(fwpd.genericparas[i]);
+              currtype:=ttypesym(currpd.genericparas[i]);
+              if fwtype.name<>currtype.name then
+                begin
+                  messagepos1(currtype.fileinfo,sym_e_generic_type_param_mismatch,currtype.realname);
+                  messagepos1(fwtype.fileinfo,sym_e_generic_type_param_decl,fwtype.realname);
+                  result:=false;
+                end;
+            end;
+        end;
+
+
       function equal_generic_procdefs(fwpd,currpd:tprocdef):boolean;
         var
           i : longint;
@@ -3806,6 +3870,13 @@ const
                         inc(fwidx);
                       until false;
                     end;
+                   { check that the type parameter names for generic methods match;
+                     we check this here and not in equal_generic_procdefs as the defs
+                     might still be different due to their parameters, so we'd generate
+                     errors without any need }
+                   if currpd.is_generic and fwpd.is_generic then
+                     { an error here is recoverable, so we simply continue }
+                     check_generic_parameters(fwpd,currpd);
                    { Everything is checked, now we can update the forward declaration
                      with the new data from the implementation }
                    fwpd.forwarddef:=currpd.forwarddef;

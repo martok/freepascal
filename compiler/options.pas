@@ -135,7 +135,8 @@ const
                         + [system_i386_GO32V2]
                         + [system_i386_freebsd]
                         + [system_i386_netbsd]
-                        + [system_i386_wdosx];
+                        + [system_i386_wdosx]
+                        + [system_riscv32_linux,system_riscv64_linux];
 
   suppported_targets_x_smallr = systems_linux + systems_solaris
                              + [system_i386_haiku]
@@ -695,6 +696,12 @@ begin
 {$ifdef sparc64}
       's',
 {$endif}
+{$ifdef riscv32}
+      'R',
+{$endif}
+{$ifdef riscv64}
+      'r',
+{$endif}
 {$ifdef avr}
       'V',
 {$endif}
@@ -1186,6 +1193,11 @@ begin
                            include(init_settings.moduleswitches,cs_fp_emulation);
                        end;
 {$endif cpufpemu}
+                    'E' :
+                      If UnsetBool(More, j, opt, false) then
+                        exclude(init_settings.localswitches,cs_check_fpu_exceptions)
+                      Else
+                        include(init_settings.localswitches,cs_check_fpu_exceptions);
                     'f' :
                       begin
                         s:=upper(copy(more,j+1,length(more)-j));
@@ -3581,6 +3593,23 @@ procedure read_arguments(cmd:TCmdStr);
         def_system_macro('FPC_COMP_IS_INT64');
       {$endif aarch64}
 
+      {$ifdef riscv32}
+        def_system_macro('CPURISCV');
+        def_system_macro('CPURISCV32');
+        def_system_macro('CPU32');
+        def_system_macro('FPC_CURRENCY_IS_INT64');
+        def_system_macro('FPC_COMP_IS_INT64');
+        def_system_macro('FPC_REQUIRES_PROPER_ALIGNMENT');
+      {$endif riscv32}
+      {$ifdef riscv64}
+        def_system_macro('CPURISCV');
+        def_system_macro('CPURISCV64');
+        def_system_macro('CPU64');
+        def_system_macro('FPC_CURRENCY_IS_INT64');
+        def_system_macro('FPC_COMP_IS_INT64');
+        def_system_macro('FPC_REQUIRES_PROPER_ALIGNMENT');
+      {$endif riscv64}
+
       {$if defined(cpu8bitalu)}
         def_system_macro('CPUINT8');
       {$elseif defined(cpu16bitalu)}
@@ -3642,7 +3671,6 @@ var
   env: ansistring;
   i : tfeature;
   j : longint;
-  abi : tabi;
   tmplist : TCmdStrList;
   cmditem,
   tmpcmditem : TCmdStrListItem;
@@ -3722,16 +3750,15 @@ begin
     if not UpdateTargetSwitchStr('FARPROCSPUSHODDBP', init_settings.targetswitches, true) then
       InternalError(2013092801);
 
-  { Set up a default prefix for binutils when cross-compiling }
-  if source_info.system<>target_info.system then
+  { Use standard Android NDK prefixes when cross-compiling }
+  if (source_info.system<>target_info.system) and (target_info.system in systems_android) then
     case target_info.system of
-      { Use standard Android NDK prefixes }
       system_arm_android:
         utilsprefix:='arm-linux-androideabi-';
       system_i386_android:
         utilsprefix:='i686-linux-android-';
-      system_mipsel_android:
-        utilsprefix:='mipsel-linux-android-';
+      else
+        utilsprefix:=target_cpu_string + '-linux-android-';
     end;
 
   { Set up default value for the heap }
@@ -4004,6 +4031,15 @@ begin
      not(cs_link_separate_dbg_file in init_settings.globalswitches) then
     exclude(init_settings.globalswitches,cs_link_strip);
 
+  { choose a reasonable tls model }
+  if (tf_section_threadvars in target_info.flags) and (init_settings.tlsmodel=tlsm_none) then
+    begin
+      if cs_create_pic in init_settings.moduleswitches then
+        init_settings.tlsmodel:=tlsm_general
+      else
+        init_settings.tlsmodel:=tlsm_local;
+    end;
+
   { set Mac OS X version default macros if not specified explicitly }
   option.MaybeSetDefaultMacVersionMacro;
 
@@ -4012,12 +4048,13 @@ begin
   if not(option.FPUSetExplicitly) and
      ((target_info.system in [system_arm_wince,system_arm_gba,
          system_m68k_amiga,system_m68k_atari,
-         system_arm_nds,system_arm_embedded])
+         system_arm_nds,system_arm_embedded,
+         system_riscv32_embedded,system_riscv64_embedded])
 {$ifdef arm}
       or (target_info.abi=abi_eabi)
 {$endif arm}
      )
-{$if defined(arm) or defined (m68k)}
+{$if defined(arm) or defined(riscv32) or defined(riscv64) or defined (m68k)}
      or (init_settings.fputype=fpu_soft)
 {$endif arm or m68k}
   then
@@ -4092,7 +4129,10 @@ begin
       { Set FPU type }
       if not(option.FPUSetExplicitly) then
         begin
-          init_settings.fputype:=fpu_vfpv3_d16
+          if init_settings.cputype < cpu_armv7 then
+            init_settings.fputype:=fpu_vfpv2
+          else
+            init_settings.fputype:=fpu_vfpv3_d16;
         end
       else
         begin
@@ -4120,6 +4160,38 @@ begin
   if (init_settings.instructionset=is_thumb) and (CPUARM_HAS_THUMB2 in cpu_capabilities[init_settings.cputype]) then
     def_system_macro('CPUTHUMB2');
 {$endif arm}
+
+{$if defined(riscv32) or defined(riscv64)}
+  { RISC-V defaults }
+  if (target_info.abi = abi_riscv_hf) then
+    begin
+      {$ifdef riscv32}
+      if not option.CPUSetExplicitly then
+        init_settings.cputype:=cpu_rv32imafd;
+      if not option.OptCPUSetExplicitly then
+        init_settings.optimizecputype:=cpu_rv32imafd;
+      {$else}
+      if not option.CPUSetExplicitly then
+        init_settings.cputype:=cpu_rv64imafdc;
+      if not option.OptCPUSetExplicitly then
+        init_settings.optimizecputype:=cpu_rv64imafdc;
+      {$endif}
+
+      { Set FPU type }
+      if not(option.FPUSetExplicitly) then
+        begin
+          init_settings.fputype:=fpu_fd;
+        end
+      else
+        begin
+          if not (init_settings.fputype in [fpu_fd]) then
+            begin
+              Message(option_illegal_fpu_eabihf);
+              StopOptions(1);
+            end;
+        end;
+    end;
+{$endif defined(riscv32) or defined(riscv64)}
 
 {$ifdef jvm}
   { set default CPU type to Dalvik when targeting Android }
@@ -4335,6 +4407,7 @@ begin
    begin
      init_settings.alignment.procalign:=1;
      init_settings.alignment.jumpalign:=1;
+     init_settings.alignment.coalescealign:=1;
      init_settings.alignment.loopalign:=1;
 {$ifdef x86}
      { constalignmax=1 keeps the executable and thus the memory foot print small but

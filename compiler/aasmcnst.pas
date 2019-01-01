@@ -269,6 +269,8 @@ type
      { finalize the asmlist: add the necessary symbols etc }
      procedure finalize_asmlist(sym: tasmsymbol; def: tdef; section: TAsmSectiontype; const secname: TSymStr; alignment: shortint; const options: ttcasmlistoptions); virtual;
      procedure finalize_asmlist_add_indirect_sym(sym: tasmsymbol; def: tdef; section: TAsmSectiontype; const secname: TSymStr; alignment: shortint; const options: ttcasmlistoptions); virtual;
+     { prepare finalization (common for the default and overridden versions }
+     procedure finalize_asmlist_prepare(const options: ttcasmlistoptions; var alignment: shortint);
 
      { functionality of the above for vectorized dead strippable sections }
      procedure finalize_vectorized_dead_strip_asmlist(def: tdef; const basename, itemname: TSymStr; st: tsymtable; alignment: shortint; options: ttcasmlistoptions); virtual;
@@ -349,7 +351,7 @@ type
      procedure emit_string_offset(const ll: tasmlabofs; const strlength: longint; const st: tstringtype; const winlikewidestring: boolean; const charptrdef: tdef);virtual;
 
      { emits a tasmlabofs as returned by begin_dynarray_const }
-     procedure emit_dynarray_offset(const ll:tasmlabofs;const arrlength:asizeint;const arrdef:tdef);virtual;
+     procedure emit_dynarray_offset(const ll:tasmlabofs;const arrlength:asizeint;const arrdef:tarraydef; const arrconstdatadef: trecorddef);virtual;
      { starts a dynamic array constant so that its data can be emitted directly afterwards }
      function begin_dynarray_const(arrdef:tdef;var startlab:tasmlabel;out arrlengthloc:ttypedconstplaceholder):tasmlabofs;virtual;
      function end_dynarray_const(arrdef:tdef;arrlength:asizeint;arrlengthloc:ttypedconstplaceholder):tdef;virtual;
@@ -364,6 +366,9 @@ type
      procedure emit_procdef_const(pd: tprocdef);
      { emit an ordinal constant }
      procedure emit_ord_const(value: int64; def: tdef);
+
+     { emit a reference to a pooled shortstring constant }
+     procedure emit_pooled_shortstring_const_ref(const str:shortstring);
 
      { begin a potential aggregate type. Must be called for any type
        that consists of multiple tai constant data entries, or that
@@ -925,9 +930,7 @@ implementation
      end;
 
 
-   procedure ttai_typedconstbuilder.finalize_asmlist(sym: tasmsymbol; def: tdef; section: TAsmSectiontype; const secname: TSymStr; alignment: shortint; const options: ttcasmlistoptions);
-     var
-       prelist: tasmlist;
+   procedure ttai_typedconstbuilder.finalize_asmlist_prepare(const options: ttcasmlistoptions; var alignment: shortint);
      begin
        if tcalo_apply_constalign in options then
          alignment:=const_align(alignment);
@@ -943,7 +946,14 @@ implementation
              tcalo_vectorized_dead_strip_end]*options)<>[]) and
           not fvectorized_finalize_called then
          internalerror(2015110602);
+     end;
 
+
+   procedure ttai_typedconstbuilder.finalize_asmlist(sym: tasmsymbol; def: tdef; section: TAsmSectiontype; const secname: TSymStr; alignment: shortint; const options: ttcasmlistoptions);
+     var
+       prelist: tasmlist;
+     begin
+       finalize_asmlist_prepare(options, alignment);
        prelist:=tasmlist.create;
        { only now add items based on the symbolname, because it may be
          modified by the "section" specifier in case of a typed constant }
@@ -1714,7 +1724,7 @@ implementation
      end;
 
 
-   procedure ttai_typedconstbuilder.emit_dynarray_offset(const ll:tasmlabofs;const arrlength:asizeint;const arrdef:tdef);
+   procedure ttai_typedconstbuilder.emit_dynarray_offset(const ll:tasmlabofs;const arrlength:asizeint;const arrdef:tarraydef; const arrconstdatadef: trecorddef);
      begin
        emit_tai(tai_const.create_sym_offset(ll.lab,ll.ofs),arrdef);
      end;
@@ -1723,7 +1733,6 @@ implementation
    function ttai_typedconstbuilder.begin_dynarray_const(arrdef:tdef;var startlab:tasmlabel;out arrlengthloc:ttypedconstplaceholder):tasmlabofs;
      var
        dynarray_symofs: asizeint;
-       elesize: word;
      begin
        result.lab:=startlab;
        result.ofs:=0;
@@ -1843,6 +1852,56 @@ implementation
          else
            internalerror(2014100501);
        end;
+     end;
+
+
+   procedure ttai_typedconstbuilder.emit_pooled_shortstring_const_ref(const str:shortstring);
+     var
+       pool : thashset;
+       entry : phashsetitem;
+       strlab : tasmlabel;
+       l : longint;
+       pc : pansichar;
+       datadef : tdef;
+       strtcb : ttai_typedconstbuilder;
+     begin
+       pool:=current_asmdata.ConstPools[sp_shortstr];
+
+       entry:=pool.FindOrAdd(@str[1],length(str));
+
+       { :-(, we must generate a new entry }
+       if not assigned(entry^.Data) then
+         begin
+           current_asmdata.getglobaldatalabel(strlab);
+
+           { include length and terminating zero for quick conversion to pchar }
+           l:=length(str);
+           getmem(pc,l+2);
+           move(str[1],pc[1],l);
+           pc[0]:=chr(l);
+           pc[l+1]:=#0;
+
+           datadef:=carraydef.getreusable(cansichartype,l+2);
+
+           { we start a new constbuilder as we don't know whether we're called
+             from inside an internal constbuilder }
+           strtcb:=ctai_typedconstbuilder.create([tcalo_is_lab,tcalo_make_dead_strippable,tcalo_apply_constalign]);
+
+           strtcb.maybe_begin_aggregate(datadef);
+           strtcb.emit_tai(Tai_string.Create_pchar(pc,l+2),datadef);
+           strtcb.maybe_end_aggregate(datadef);
+
+           current_asmdata.asmlists[al_typedconsts].concatList(
+             strtcb.get_final_asmlist(strlab,datadef,sec_rodata_norel,strlab.name,const_align(sizeof(pint)))
+           );
+           strtcb.free;
+
+           entry^.Data:=strlab;
+         end
+       else
+         strlab:=tasmlabel(entry^.Data);
+
+       emit_tai(tai_const.Create_sym(strlab),charpointertype);
      end;
 
 
